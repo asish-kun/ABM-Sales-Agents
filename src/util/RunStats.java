@@ -50,7 +50,7 @@ public class RunStats {
 	}
 
 	/**
-	 * @param numberRuns the numberRuns to set
+//	 * @param __numberRuns the numberRuns to set
 	 */
 	public void setNumberRuns(int _numberRuns) {
 		this.numberRuns = _numberRuns;
@@ -68,9 +68,9 @@ public class RunStats {
 	/**
 	 * Generic data set for including new run KPI of specific key in the map
 	 * 
-	 * @param _int is the index of the KPI in the list of pairs to be retrieved
-	 * @param _numberOfRun 
-	 * @param _array data to set for run _numberOfRun
+//	 * @param _int is the index of the KPI in the list of pairs to be retrieved
+//	 * @param _numberOfRun
+//	 * @param _array data to set for run _numberOfRun
 	 */
 	public void setKPIForRun(int _index, int _numberOfRun, float _array[]) {
 
@@ -82,8 +82,8 @@ public class RunStats {
 	 * Generic data set for including new run KPI of specific key in the map
 	 * 
 	 * @param _key the key of the KPI in the map to be retrieved
-	 * @param _numberOfRun 
-	 * @param _array data to set for run _numberOfRun
+//	 * @param _numberOfRun
+//	 * @param _array data to set for run _numberOfRun
 	 */
 	public void createKPIInMap (int _index, String _key) {
 		
@@ -101,7 +101,7 @@ public class RunStats {
 	}
 
 	/**
-	 * @param numberSteps the numberSteps to set
+//	 * @param numberSteps the numberSteps to set
 	 */
 	public void setNumberSteps(int _numberSteps) {
 		this.numberSteps = _numberSteps;

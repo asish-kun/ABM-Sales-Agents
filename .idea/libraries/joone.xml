@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="joone">
+    <CLASSES />
+    <JAVADOC />
+    <SOURCES>
+      <root url="file://$PROJECT_DIR$/libraries/joone-editor-src-1/joone" />
+    </SOURCES>
+  </library>
+</component>

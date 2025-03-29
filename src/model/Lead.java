@@ -115,7 +115,7 @@ public class Lead {
 	//--------------------------- Constructor ---------------------------//
 	/**
 	 * constructor of Lead
-	 * @param atRandom is to set magnitude & convCertainty at random
+//	 * @param atRandom is to set magnitude & convCertainty at random
 	 */
 	public Lead (XoRoShiRo128PlusRandom _random, ModelParameters _params, int _step){
 		
