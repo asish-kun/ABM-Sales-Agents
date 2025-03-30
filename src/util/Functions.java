@@ -242,14 +242,13 @@ public class Functions {
 		boolean[] used = new boolean[size];
 		int[] results = new int[size];
 		int index;
-		
-		for(int i=0; i<size; i++) {
-			index = Functions.randomWeightedSelectionRestricted(
-				array, used, random.nextDouble(0,1)
-			);
+
+		for (int i = 0; i < size; i++) {
+			index = Functions.randomWeightedSelectionRestricted(array, used, random.nextDouble());
 			results[i] = index;
 			used[index] = true;
 		}
+
 		return results;
 	}
 	

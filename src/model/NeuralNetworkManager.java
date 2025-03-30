@@ -1,71 +1,85 @@
 package model;
 
-import java.io.File;
+import org.deeplearning4j.nn.conf.distribution.Distribution;
+import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
+import org.deeplearning4j.nn.conf.*;
+import org.deeplearning4j.nn.conf.layers.*;
+import org.deeplearning4j.nn.weights.WeightInit;
+import org.nd4j.linalg.learning.config.Sgd;
+import org.nd4j.linalg.lossfunctions.LossFunctions;
+import org.deeplearning4j.nn.api.OptimizationAlgorithm;
+import org.nd4j.linalg.activations.Activation;
+import org.nd4j.linalg.dataset.DataSet;
+import org.deeplearning4j.nn.conf.distribution.NormalDistribution;
+import org.nd4j.linalg.factory.Nd4j;
+import org.nd4j.linalg.api.ndarray.INDArray;
 
-import org.joone.engine.FullSynapse;
-import org.joone.engine.LinearLayer;
-import org.joone.engine.Monitor;
-import org.joone.engine.NeuralNet;
-import org.joone.engine.SigmoidLayer;
-import org.joone.engine.TeachingSynapse;
-import org.joone.io.FileInputSynapse;
-
+/**
+ * A manager to build, train, and store a MultiLayerNetwork (DL4J)
+ * for each sales agent.
+ */
 public class NeuralNetworkManager {
 
- private NeuralNet nnet;
+    private MultiLayerNetwork model;
+    private int inputSize;
 
- public void buildAndTrainNetwork(String trainingFilePath) {
-  // 1) Create layers
-  LinearLayer input = new LinearLayer();
-  SigmoidLayer hidden = new SigmoidLayer();
-  SigmoidLayer output = new SigmoidLayer();
+    public NeuralNetworkManager(int inputSize) {
+        this.inputSize = inputSize;
+        this.model = buildNetwork(inputSize);
+    }
 
-  input.setRows(2);   // XOR input: 2 values
-  hidden.setRows(3);  // Hidden neurons
-  output.setRows(1);  // XOR output: 1 value
+    private MultiLayerNetwork buildNetwork(int numInputs) {
+        int hiddenSize = 16; // example
+        Distribution dist = new NormalDistribution(0, 0.01);
 
-  // 2) Create synapses
-  FullSynapse synapseIH = new FullSynapse(); // input -> hidden
-  FullSynapse synapseHO = new FullSynapse(); // hidden -> output
+        MultiLayerConfiguration config = new NeuralNetConfiguration.Builder()
+                .seed(12345)
+                .weightInit(WeightInit.DISTRIBUTION)
+                .dist(dist)
+                .updater(new Sgd(0.01))
+                .optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT)
+                .list()
+                .layer(0, new DenseLayer.Builder()
+                        .nIn(numInputs)
+                        .nOut(hiddenSize)
+                        .activation(Activation.RELU)
+                        .build())
+                .layer(1, new DenseLayer.Builder()
+                        .nIn(hiddenSize)
+                        .nOut(hiddenSize)
+                        .activation(Activation.RELU)
+                        .build())
+                .layer(2, new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
+                        .nIn(hiddenSize)
+                        .nOut(2)  // 2 outputs: [probConversion, probFallOff]
+                        .activation(Activation.SIGMOID)
+                        .build())
+                .build();
 
-  // 3) Connect layers through synapses
-  input.addOutputSynapse(synapseIH);
-  hidden.addInputSynapse(synapseIH);
+        MultiLayerNetwork net = new MultiLayerNetwork(config);
+        net.init();
+        return net;
+    }
 
-  hidden.addOutputSynapse(synapseHO);
-  output.addInputSynapse(synapseHO);
+    /**
+     * Train this agent's network on a subset of data.
+     */
+    public void train(DataSet dataSet, int epochs) {
+        for (int i = 0; i < epochs; i++) {
+            model.fit(dataSet);
+        }
+    }
 
-  // 4) Create neural net and add layers
-  nnet = new NeuralNet();
-  nnet.addLayer(input, NeuralNet.INPUT_LAYER);
-  nnet.addLayer(hidden, NeuralNet.HIDDEN_LAYER);
-  nnet.addLayer(output, NeuralNet.OUTPUT_LAYER);
+    /**
+     * Predict the (probConversion, probFallOff).
+     */
+    public float[] predict(float[] features) {
+        INDArray input = Nd4j.create(features, new int[]{1, inputSize});
+        INDArray output = model.output(input);
+        return output.toFloatVector();
+    }
 
-  // 5) Setup monitor
-  Monitor monitor = nnet.getMonitor();
-  monitor.setLearningRate(0.7);
-  monitor.setMomentum(0.5);
-  monitor.setTrainingPatterns(4);     // XOR dataset has 4 rows
-  monitor.setTotCicles(2000);
-  monitor.setLearning(true);
-
-  // 6) Hook up input file
-  FileInputSynapse inputStream = new FileInputSynapse();
-  inputStream.setInputFile(new File(trainingFilePath));
-  inputStream.setAdvancedColumnSelector("1,2"); // Inputs in columns 1 & 2
-  input.addInputSynapse(inputStream);
-
-  // 7) Hook up output (expected values)
-  FileInputSynapse targetStream = new FileInputSynapse();
-  targetStream.setInputFile(new File(trainingFilePath));
-  targetStream.setAdvancedColumnSelector("3"); // Output in column 3
-
-  TeachingSynapse trainer = new TeachingSynapse();
-  trainer.setDesired(targetStream);
-  nnet.setTeacher(trainer);
-  output.addOutputSynapse(trainer);
-
-  // 8) Start training
-  nnet.go();
- }
+    public MultiLayerNetwork getModel() {
+        return model;
+    }
 }

@@ -57,6 +57,8 @@ public class SalesPerson implements Steppable {
 	float quota;						// weekly quota to get the bonus
 	float rateForBonus;
 
+	private NeuralNetworkManager nnManager; // Initializing Neural Network for this Sales Agent
+
 	//--------------------------- Get/Set methods ---------------------------//
 	
 	public float getRiskAversion() {
@@ -77,7 +79,7 @@ public class SalesPerson implements Steppable {
 
 	/**
 	 * Sets the id of the agent
-	 * @param gamerAgentId
+//	 * @param gamerAgentId
 	 */
 	public void setGamerAgentId(int _gamerAgentId) {
 		this.gamerAgentId = _gamerAgentId;
@@ -202,10 +204,10 @@ public class SalesPerson implements Steppable {
 	/**
 	 * Initializes a new instance of the Agent class.
 	 * 
-	 * @param _agentId is the if of the agent 
-	 * @param _params the set of parameters of the model
+//	 * @param _agentId is the if of the agent
+//	 * @param _params the set of parameters of the model
 
-	 * @param _maxSteps the max steps of the simulation
+//	 * @param _maxSteps the max steps of the simulation
 	 * 
 	 */
 	public SalesPerson(int _agentId, ModelParameters _params, XoRoShiRo128PlusRandom _random) { 
@@ -213,10 +215,11 @@ public class SalesPerson implements Steppable {
 		this.gamerAgentId = _agentId;
 		
 		float _riskAv;
-		
-		do { 
-			_riskAv = (float) _random.nextGaussian(_params.getFloatParameter("avgRiskAversion"), 
-					_params.getFloatParameter("stdevRiskAversion"));
+
+		do {
+			double standardNormal = _random.nextGaussian();
+			_riskAv = (float)(_params.getFloatParameter("avgRiskAversion") +
+					_params.getFloatParameter("stdevRiskAversion") * standardNormal);
 		} while (_riskAv > 1 || _riskAv < 0);
 			
 		/*
@@ -253,7 +256,9 @@ public class SalesPerson implements Steppable {
 				System.out.println("Portfolio pos " + i + " with lead: " + ((Lead)this.portfolio.get(i)).printStatsLead());
 		}
 		
-		this.probOptions = new double[_params.getIntParameter("portfolioSize")];	
+		this.probOptions = new double[_params.getIntParameter("portfolioSize")];
+		// Suppose you have 3 relevant input features for each lead
+		this.nnManager = new NeuralNetworkManager(3);
 		
 	}	
 	
@@ -273,7 +278,12 @@ public class SalesPerson implements Steppable {
 		
 		return result;
 	}*/
-	
+
+	public void trainNetwork(org.nd4j.linalg.dataset.DataSet data, int epochs) {
+		this.nnManager.train(data, epochs);
+	}
+
+
 
 	/**
 	 * Calculate the utility values for each option, which is each lead in the portfolio
@@ -480,6 +490,17 @@ public class SalesPerson implements Steppable {
 			
 		}		
 	}
+
+	// >>> 5) Utility method to create the input features for each lead
+	private float[] extractFeatures(Lead lead, int currentStep) {
+		// For demonstration, let's pick 3 features:
+		// 1) lead magnitude, 2) lead convCertainty, 3) the current step
+		return new float[] {
+				lead.getMagnitude(),
+				lead.getConvCertainty(),
+				(float)currentStep
+		};
+	}
 	
 	
 	//--------------------------- Steppable method --------------------------//	
@@ -511,27 +532,24 @@ public class SalesPerson implements Steppable {
 				
 		// PHASE 2: DECIDE, FOR EVERY HOUR OF THE TIME-STEP (WEEK) THE LEADS TO WORK ON
 		for (int h = 0; h < this.workingHours[currentStep]; h++ ) {
-		
-			// this function applies the DM decision on which lead to work on this time-step (hour)
 			int chosenLead = this.decisionMakingLeadToWork(model.random);
-				
-			/*if (ModelParameters.DEBUG == true ) {
-				System.out.println("chosen lead is " + chosenLead);
-				}*/
-				
+
+			// Update leads, marking which was worked on
 			for (int k = 0; k < this.portfolio.size(); k++) {
-				
-				if (k == chosenLead)
-					this.portfolio.get(k).updateLeadProbs(true);
-				else
-					this.portfolio.get(k).updateLeadProbs(false);
-				
-				
-				/* if (ModelParameters.DEBUG == true && this.gamerAgentId == 0)
-					System.out.println("lead " + k + ": prob2Conv: " + this.portfolio.get(k).getProbToBeConverted() + 
-						", prob2FallOff: " + this.portfolio.get(k).getProbToFallOff()) ;
-					*/	
-			}						
+				Lead lead = this.portfolio.get(k);
+				boolean hasWorked = (k == chosenLead);
+				lead.updateLeadProbs(hasWorked);
+
+				// >>> After we update the lead’s internal dynamic, let's get fresh NN predictions
+				// Build your input feature vector
+				float[] inputFeatures = extractFeatures(lead, currentStep);
+
+				// Inference
+				float[] output = nnManager.predict(inputFeatures);
+				// Suppose output[0] = probConversion, output[1] = probFallOff
+				lead.setProbToBeConverted(output[0]);
+				lead.setProbToFallOff(output[1]);
+			}
 		}
 		
 		// PHASE 3: UPDATE THE PROBS (ONLY IF SALESPEOPLE WERE WORKING ON IT A WEEK) OF THE PORTFOLIO TO ALSO COUNT THOSE CONVERTED AND FALLEN-OFF

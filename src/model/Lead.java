@@ -34,6 +34,7 @@ public class Lead {
 	private float probToBeConverted;		// \in [0,1]; the prob. of be converted by the salesperson
 
 	private float probToFallOff;			// \in [0,1]; it is the probability to fall-off after not working on it
+
 	
 	
 	// Functions or methods of the class
@@ -67,7 +68,7 @@ public class Lead {
 		return convCertainty;
 	}
 
-	public void setConvUncertainty(float convCertainty) {
+	public void setConvCertainty(float convCertainty) {
 		this.convCertainty = convCertainty;
 	}
 
@@ -161,18 +162,16 @@ public class Lead {
 
 		do { 			
 			_magnitude = -1;
-			
-			if (_params.getIntParameter("distributionForLeads") == ModelParameters.NORMAL_LEADS_MAGNITUDE ) {
-				// magnitude values and conversion uncertainty (linked to them)
-				_magnitude = (float) _random.nextGaussian( _params.getFloatParameter("avgLeadsMagnitude"),  _params.getFloatParameter("stdevLeadsMagnitude"));
-			
-				//System.out.println("normal distrib. used with mean " + _params.getFloatParameter("avgLeadMagnitude") +
-				//		 " and stdev " + _params.getFloatParameter("stdevLeadMagnitude") );
 
-			} else if (_params.getIntParameter("distributionForLeads") == ModelParameters.UNIFORM_LEADS_MAGNITUDE ) {
+			if (_params.getIntParameter("distributionForLeads") == ModelParameters.NORMAL_LEADS_MAGNITUDE) {
+				double standardNormal = _random.nextGaussian();
+				_magnitude = (float)(_params.getFloatParameter("avgLeadsMagnitude") +
+						_params.getFloatParameter("stdevLeadsMagnitude") * standardNormal);
+			}
+			else if (_params.getIntParameter("distributionForLeads") == ModelParameters.UNIFORM_LEADS_MAGNITUDE ) {
 				// instead of using a Normal distribution, we apply an uniform to have more diversity in the
-				_magnitude = (float) _random.nextFloat(ModelParameters.MIN_MAGNITUDE, ModelParameters.MAX_MAGNITUDE);
-				
+				_magnitude = ModelParameters.MIN_MAGNITUDE + _random.nextFloat() * (ModelParameters.MAX_MAGNITUDE - ModelParameters.MIN_MAGNITUDE);
+
 				//System.out.println("uniform distrib. used");
 			}				
 			
@@ -188,8 +187,9 @@ public class Lead {
 			_convCer = (float) _random.nextFloat((float)0.5, (float)1); */
 		
 		// END REMOVED: NO ORTHOGONALITY FOR conversion uncertainty 
-		
-		_convCer = (float) _random.nextFloat((float)0, (float)1);		
+
+		_convCer = _random.nextFloat();  // Generates a value in [0, 1)
+
 		this.convCertainty = _convCer;
 		
 	}
@@ -223,7 +223,23 @@ public class Lead {
 			this.finalStatus = ModelParameters.LEAD_IS_LOST;
 		
 	}
-	
+
+	/**
+	 *
+	 * With this function we update the probs of the lead depending on its work by the salesperson or not
+	 *
+	 */
+	// You might add an optional logging statement to see the new probabilities:
+	public void updateFromNN(float probConv, float probFallOff) {
+		this.probToBeConverted = probConv;
+		this.probToFallOff = probFallOff;
+		if (ModelParameters.DEBUG) {
+			System.out.println("Lead ID " + this.ID
+					+ " updated from NN => pC=" + probConv + ", pF=" + probFallOff);
+		}
+	}
+
+
 	/**
 	 * 
 	 * With this function we update the probs of the lead depending on its work by the salesperson or not
