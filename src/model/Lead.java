@@ -34,7 +34,6 @@ public class Lead {
 	private float probToBeConverted;		// \in [0,1]; the prob. of be converted by the salesperson
 
 	private float probToFallOff;			// \in [0,1]; it is the probability to fall-off after not working on it
-
 	
 	
 	// Functions or methods of the class
@@ -68,7 +67,7 @@ public class Lead {
 		return convCertainty;
 	}
 
-	public void setConvCertainty(float convCertainty) {
+	public void setConvUncertainty(float convCertainty) {
 		this.convCertainty = convCertainty;
 	}
 
@@ -222,21 +221,6 @@ public class Lead {
 		else
 			this.finalStatus = ModelParameters.LEAD_IS_LOST;
 		
-	}
-
-	/**
-	 *
-	 * With this function we update the probs of the lead depending on its work by the salesperson or not
-	 *
-	 */
-	// You might add an optional logging statement to see the new probabilities:
-	public void updateFromNN(float probConv, float probFallOff) {
-		this.probToBeConverted = probConv;
-		this.probToFallOff = probFallOff;
-		if (ModelParameters.DEBUG) {
-			System.out.println("Lead ID " + this.ID
-					+ " updated from NN => pC=" + probConv + ", pF=" + probFallOff);
-		}
 	}
 
 

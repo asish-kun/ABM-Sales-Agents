@@ -1,4 +1,4 @@
- package model;
+package model;
 
 import sim.engine.*;
 
@@ -6,12 +6,32 @@ import org.eclipse.collections.impl.list.mutable.FastList;
 
 import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
 
+// DL4J / ND4J imports
+import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
+import org.nd4j.linalg.dataset.api.preprocessor.NormalizerMinMaxScaler;
+import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.factory.Nd4j;
+import org.nd4j.linalg.api.ndarray.INDArray;
+
+// Apache POI imports for Excel reading (example)
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Class of an agent SalesPerson of the ABM4Sales model
 
  * @author mchica
  * @date 2022/09/22
  *
+ * Modified to include a neural network that is trained from an Excel dataset.
+ *
+ * @author ...
+ * @date ...
  */
 
 public class SalesPerson implements Steppable {
@@ -57,7 +77,8 @@ public class SalesPerson implements Steppable {
 	float quota;						// weekly quota to get the bonus
 	float rateForBonus;
 
-	private NeuralNetworkManager nnManager; // Initializing Neural Network for this Sales Agent
+	// ---------------- NEW: Neural network for this salesperson ----------------
+	private NeuralNetworkManager nnManager;
 
 	//--------------------------- Get/Set methods ---------------------------//
 	
@@ -218,8 +239,8 @@ public class SalesPerson implements Steppable {
 
 		do {
 			double standardNormal = _random.nextGaussian();
-			_riskAv = (float)(_params.getFloatParameter("avgRiskAversion") +
-					_params.getFloatParameter("stdevRiskAversion") * standardNormal);
+			_riskAv = (float)(_params.getFloatParameter("avgRiskAversion")
+					+ _params.getFloatParameter("stdevRiskAversion") * standardNormal);
 		} while (_riskAv > 1 || _riskAv < 0);
 			
 		/*
@@ -231,18 +252,24 @@ public class SalesPerson implements Steppable {
 		this.riskAversion = _riskAv;
 				
 		this.quota = _params.getFloatParameter("quota");
-		
-		this.workingHours = new float [_params.getIntParameter("maxSteps")];
-		this.pay = new float [_params.getIntParameter("maxSteps")];
-		this.convertedLeads = new float [_params.getIntParameter("maxSteps")];
-		this.expectedConvertedLeads = new float [_params.getIntParameter("maxSteps")];
-		this.expectedFallOffLeads = new float [_params.getIntParameter("maxSteps")];
-		this.convertedLeadsByMagnitude = new float [_params.getIntParameter("maxSteps")];
-		this.fallOffLeads = new float [_params.getIntParameter("maxSteps")];
-	
-		for (int i = 0; i < _params.getIntParameter("maxSteps"); i++) {					
-			this.workingHours[i] = this.pay[i] = this.convertedLeads[i] =  this.expectedConvertedLeads[i] =  this.expectedFallOffLeads[i] = 
-					this.convertedLeadsByMagnitude[i] = this.fallOffLeads[i] = (float)0.;
+
+		int maxSteps = _params.getIntParameter("maxSteps");
+		this.workingHours  = new float[maxSteps];
+		this.pay           = new float[maxSteps];
+		this.convertedLeads= new float[maxSteps];
+		this.expectedConvertedLeads = new float[maxSteps];
+		this.expectedFallOffLeads   = new float[maxSteps];
+		this.convertedLeadsByMagnitude = new float[maxSteps];
+		this.fallOffLeads   = new float[maxSteps];
+
+		for (int i = 0; i < maxSteps; i++) {
+			this.workingHours[i]  = 0.f;
+			this.pay[i]           = 0.f;
+			this.convertedLeads[i]= 0.f;
+			this.expectedConvertedLeads[i] = 0.f;
+			this.expectedFallOffLeads[i]   = 0.f;
+			this.convertedLeadsByMagnitude[i] = 0.f;
+			this.fallOffLeads[i]  = 0.f;
 		}
 		
 		this.portfolio = new FastList <Lead> (_params.getIntParameter("portfolioSize"));
@@ -257,33 +284,133 @@ public class SalesPerson implements Steppable {
 		}
 		
 		this.probOptions = new double[_params.getIntParameter("portfolioSize")];
-		// Suppose you have 3 relevant input features for each lead
-		this.nnManager = new NeuralNetworkManager(3);
-		
-	}	
-	
 
-	// ########################################################################	
-	// Methods/Functions 	
-	// ########################################################################
-
-
-	/*private String printAgentInfo() {
-
-		String result = "";
-
-		result += "agent id (" + this.gamerAgentId + "): ";
-		result += "portfolioSize = " + this.portfolio.size() + ", ";
-		result += "riskAv = " + this.riskAversion + "\n";
-		
-		return result;
-	}*/
-
-	public void trainNetwork(org.nd4j.linalg.dataset.DataSet data, int epochs) {
-		this.nnManager.train(data, epochs);
+		// ---------------- NEW: Initialize the neural network manager -----------
+		// Example: Suppose we have 4 input features for [magnitude, convCertainty, probToBeConverted, probToFallOff],
+		// or any set of features that you want. Adjust as needed.
+		this.nnManager = new NeuralNetworkManager(4);
 	}
 
+	// ########################################################################
+	// NEW: Training the neural network from an Excel file
+	// ########################################################################
+	/**
+	 * Loads training data from an Excel file and trains the neural network
+	 * with a chosen number of records and epochs.
+	 *
+	 * @param excelFilePath path to the .xlsx file
+	 * @param epochs how many passes to do over the subset of data
+	 * @param recordsUsed how many rows from the Excel to train on
+	 */
+	public void trainNeuralNetworkFromExcel(String excelFilePath, int epochs, int recordsUsed) {
+		try {
+			DataSet ds = loadDataFromExcel(excelFilePath, recordsUsed);
 
+			// Optionally scale/normalize your data (if needed):
+			NormalizerMinMaxScaler scaler = new NormalizerMinMaxScaler(0, 1);
+			scaler.fit(ds);
+			scaler.transform(ds);
+
+			// Train using the specialized manager
+			nnManager.train(ds, epochs);
+
+			if (ModelParameters.DEBUG) {
+				System.out.println("SalesPerson " + this.gamerAgentId
+						+ " finished NN training with " + recordsUsed + " records, for " + epochs + " epochs.");
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+	/**
+	 * Example function to read 'recordsUsed' rows from an Excel file
+	 * and convert them into an ND4J DataSet.
+	 *
+	 * Adjust the columns / logic to match your actual dataset.
+	 */
+	private DataSet loadDataFromExcel(String excelFilePath, int recordsUsed) throws Exception {
+		FileInputStream fis = new FileInputStream(new File(excelFilePath));
+		Workbook workbook = new XSSFWorkbook(fis);
+		Sheet sheet = workbook.getSheetAt(0);
+
+		// We'll store input features and labels in lists first
+		List<float[]> featuresList = new ArrayList<>();
+		List<float[]> labelsList   = new ArrayList<>();
+
+		// Suppose:
+		//   - The Excel has columns: [Magnitude, ConvCertainty, ProbConverted, ProbFallOff, LabelConv, LabelFallOff]
+		//   - The first row is a header
+		//   - We want the first 4 columns as input, last 2 columns as label
+		// Adjust these indices to match your real spreadsheet
+		int rowCount = 0;
+		for (Row row : sheet) {
+			// skip header row
+			if (row.getRowNum() == 0) {
+				continue;
+			}
+			if (rowCount >= recordsUsed) break;
+			// read input
+			Cell magnitudeCell        = row.getCell(0);
+			Cell convCertaintyCell    = row.getCell(1);
+			Cell probConvertedCell    = row.getCell(2);
+			Cell probFallOffCell      = row.getCell(3);
+			Cell labelConvCell        = row.getCell(4);
+			Cell labelFallOffCell     = row.getCell(5);
+
+			if(magnitudeCell == null || convCertaintyCell == null ||
+					probConvertedCell == null || probFallOffCell == null ||
+					labelConvCell == null || labelFallOffCell == null) {
+				continue; // skip incomplete row
+			}
+
+			// Extract numeric values (adjust to your cell types)
+			float magnitude     = (float) magnitudeCell.getNumericCellValue();
+			float convCertainty = (float) convCertaintyCell.getNumericCellValue();
+			float pConverted    = (float) probConvertedCell.getNumericCellValue();
+			float pFallOff      = (float) probFallOffCell.getNumericCellValue();
+
+			float labelConvVal   = (float) labelConvCell.getNumericCellValue();
+			float labelFallOffVal= (float) labelFallOffCell.getNumericCellValue();
+
+			// Build arrays
+			float[] inArr  = new float[]{magnitude, convCertainty, pConverted, pFallOff};
+			float[] outArr = new float[]{labelConvVal, labelFallOffVal};
+
+			featuresList.add(inArr);
+			labelsList.add(outArr);
+
+			rowCount++;
+		}
+		workbook.close();
+		fis.close();
+
+		// Create INDArray from the lists
+		int nRows = featuresList.size();
+		int nIn   = 4; // number of input columns
+		int nOut  = 2; // number of output columns
+
+		INDArray featureMatrix = Nd4j.create(nRows, nIn);
+		INDArray labelMatrix   = Nd4j.create(nRows, nOut);
+
+		for (int i = 0; i < nRows; i++) {
+			float[] in  = featuresList.get(i);
+			float[] out = labelsList.get(i);
+
+			for (int j = 0; j < nIn; j++) {
+				featureMatrix.putScalar(new int[]{i,j}, in[j]);
+			}
+			for (int k = 0; k < nOut; k++) {
+				labelMatrix.putScalar(new int[]{i,k}, out[k]);
+			}
+		}
+
+		return new DataSet(featureMatrix, labelMatrix);
+	}
+
+	// ########################################################################
+	// Existing methods
+	// ########################################################################
 
 	/**
 	 * Calculate the utility values for each option, which is each lead in the portfolio
@@ -536,19 +663,11 @@ public class SalesPerson implements Steppable {
 
 			// Update leads, marking which was worked on
 			for (int k = 0; k < this.portfolio.size(); k++) {
-				Lead lead = this.portfolio.get(k);
-				boolean hasWorked = (k == chosenLead);
-				lead.updateLeadProbs(hasWorked);
-
-				// >>> After we update the lead’s internal dynamic, let's get fresh NN predictions
-				// Build your input feature vector
-				float[] inputFeatures = extractFeatures(lead, currentStep);
-
-				// Inference
-				float[] output = nnManager.predict(inputFeatures);
-				// Suppose output[0] = probConversion, output[1] = probFallOff
-				lead.setProbToBeConverted(output[0]);
-				lead.setProbToFallOff(output[1]);
+				if (k == chosenLead) {
+					this.portfolio.get(k).updateLeadProbs(true);
+				} else {
+					this.portfolio.get(k).updateLeadProbs(false);
+				}
 			}
 		}
 		
@@ -557,5 +676,3 @@ public class SalesPerson implements Steppable {
 		this.calculatePayWithCompensation();		
 	}
 }
-
-
