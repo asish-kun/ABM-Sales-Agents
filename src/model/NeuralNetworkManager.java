@@ -5,6 +5,7 @@ import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
 import org.deeplearning4j.nn.conf.*;
 import org.deeplearning4j.nn.conf.layers.*;
 import org.deeplearning4j.nn.weights.WeightInit;
+import org.deeplearning4j.nn.weights.WeightInitDistribution;
 import org.nd4j.linalg.learning.config.Sgd;
 import org.nd4j.linalg.lossfunctions.LossFunctions;
 import org.deeplearning4j.nn.api.OptimizationAlgorithm;
@@ -30,12 +31,10 @@ public class NeuralNetworkManager {
 
     private MultiLayerNetwork buildNetwork(int numInputs) {
         int hiddenSize = 16; // example
-        Distribution dist = new NormalDistribution(0, 0.01);
 
         MultiLayerConfiguration config = new NeuralNetConfiguration.Builder()
                 .seed(12345)
-                .weightInit(WeightInit.DISTRIBUTION)
-                .dist(dist)
+                .weightInit(new WeightInitDistribution(new NormalDistribution(0, 0.01)))
                 .updater(new Sgd(0.01))
                 .optimizationAlgo(OptimizationAlgorithm.STOCHASTIC_GRADIENT_DESCENT)
                 .list()
@@ -49,9 +48,9 @@ public class NeuralNetworkManager {
                         .nOut(hiddenSize)
                         .activation(Activation.RELU)
                         .build())
-                .layer(2, new OutputLayer.Builder(LossFunctions.LossFunction.MSE)
+                .layer(2, new OutputLayer.Builder(LossFunctions.LossFunction.XENT)  // <---- cross-entropy
                         .nIn(hiddenSize)
-                        .nOut(2)  // 2 outputs: [probConversion, probFallOff]
+                        .nOut(2)
                         .activation(Activation.SIGMOID)
                         .build())
                 .build();
@@ -60,6 +59,7 @@ public class NeuralNetworkManager {
         net.init();
         return net;
     }
+
 
     /**
      * Train this agent's network on a subset of data.

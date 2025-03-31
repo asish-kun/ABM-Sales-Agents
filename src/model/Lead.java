@@ -223,6 +223,24 @@ public class Lead {
 		
 	}
 
+	public void predictWithNN(NeuralNetworkManager nnManager, int currentStep) {
+		// Build input features: same as used during training
+		float[] features = new float[]{
+				this.magnitude,
+				this.convCertainty,
+				this.probToBeConverted,  // optional: historical state
+				this.probToFallOff,      // optional: historical state
+				//(float) currentStep      // optional: simulation step
+		};
+
+		float[] predictions = nnManager.predict(features);
+
+		this.probToBeConverted = predictions[0];
+		this.probToFallOff = predictions[1];
+	}
+
+
+
 
 	/**
 	 * 

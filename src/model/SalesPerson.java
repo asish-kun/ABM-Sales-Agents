@@ -656,7 +656,11 @@ public class SalesPerson implements Steppable {
 			this.workingHours[currentStep] = ModelParameters.WORKINGHOURSPERWEEK;			
 			
 		}
-				
+
+		for (Lead lead : this.portfolio) {
+			lead.predictWithNN(this.nnManager, currentStep);
+		}
+
 		// PHASE 2: DECIDE, FOR EVERY HOUR OF THE TIME-STEP (WEEK) THE LEADS TO WORK ON
 		for (int h = 0; h < this.workingHours[currentStep]; h++ ) {
 			int chosenLead = this.decisionMakingLeadToWork(model.random);
