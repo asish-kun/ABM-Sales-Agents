@@ -1,1 +1,1 @@
-keyNameExp;simpleTest_WithExpectedSales_A;fitValue;0.13372752063149895;CLs;27208.666015625;ExpectedCLs;31408.900390625
+keyNameExp;simpleTest_WithExpectedSales_A;fitValue;1.0;CLs;0.0;ExpectedCLs;325.5333251953125

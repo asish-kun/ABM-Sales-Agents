@@ -80,6 +80,10 @@ public class SalesPerson implements Steppable {
 	// ---------------- NEW: Neural network for this salesperson ----------------
 	private NeuralNetworkManager nnManager;
 
+	private int trainingRecordCount = 600;
+
+	private boolean hasTrainedOnce = false;
+
 	//--------------------------- Get/Set methods ---------------------------//
 	
 	public float getRiskAversion() {
@@ -234,6 +238,11 @@ public class SalesPerson implements Steppable {
 	public SalesPerson(int _agentId, ModelParameters _params, XoRoShiRo128PlusRandom _random) { 
 
 		this.gamerAgentId = _agentId;
+
+		// ---------------- NEW: Initialize the neural network manager -----------
+		// Example: Suppose we have 4 input features for [magnitude, convCertainty, probToBeConverted, probToFallOff],
+		// or any set of features that you want. Adjust as needed.
+		this.nnManager = new NeuralNetworkManager(9);
 		
 		float _riskAv;
 
@@ -277,18 +286,13 @@ public class SalesPerson implements Steppable {
 		this.rateForBonus = _params.getFloatParameter("rateForBonus");
 		
 		for (int i = 0; i < _params.getIntParameter("portfolioSize"); i++) {					
-			this.portfolio.add(new Lead (_random, _params, 0));		
+			this.portfolio.add(new Lead (_random, _params, 0, this.nnManager));
 			
 			if (ModelParameters.DEBUG == true)
 				System.out.println("Portfolio pos " + i + " with lead: " + ((Lead)this.portfolio.get(i)).printStatsLead());
 		}
 		
 		this.probOptions = new double[_params.getIntParameter("portfolioSize")];
-
-		// ---------------- NEW: Initialize the neural network manager -----------
-		// Example: Suppose we have 4 input features for [magnitude, convCertainty, probToBeConverted, probToFallOff],
-		// or any set of features that you want. Adjust as needed.
-		this.nnManager = new NeuralNetworkManager(4);
 	}
 
 	// ########################################################################
@@ -306,17 +310,17 @@ public class SalesPerson implements Steppable {
 		try {
 			DataSet ds = loadDataFromExcel(excelFilePath, recordsUsed);
 
-			// Optionally scale/normalize your data (if needed):
+			// Optionally scale/normalize your data:
 			NormalizerMinMaxScaler scaler = new NormalizerMinMaxScaler(0, 1);
 			scaler.fit(ds);
 			scaler.transform(ds);
 
-			// Train using the specialized manager
 			nnManager.train(ds, epochs);
 
 			if (ModelParameters.DEBUG) {
 				System.out.println("SalesPerson " + this.gamerAgentId
-						+ " finished NN training with " + recordsUsed + " records, for " + epochs + " epochs.");
+						+ " finished NN training with " + recordsUsed
+						+ " records, for " + epochs + " epochs.");
 			}
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -324,71 +328,86 @@ public class SalesPerson implements Steppable {
 	}
 
 	/**
-	 * Example function to read 'recordsUsed' rows from an Excel file
-	 * and convert them into an ND4J DataSet.
-	 *
-	 * Adjust the columns / logic to match your actual dataset.
+	 * Load data from Excel (adjust columns as needed).
+	 * This is exactly as in your original code.
 	 */
 	private DataSet loadDataFromExcel(String excelFilePath, int recordsUsed) throws Exception {
 		FileInputStream fis = new FileInputStream(new File(excelFilePath));
 		Workbook workbook = new XSSFWorkbook(fis);
 		Sheet sheet = workbook.getSheetAt(0);
 
-		// We'll store input features and labels in lists first
 		List<float[]> featuresList = new ArrayList<>();
 		List<float[]> labelsList   = new ArrayList<>();
 
-		// Suppose:
-		//   - The Excel has columns: [Magnitude, ConvCertainty, ProbConverted, ProbFallOff, LabelConv, LabelFallOff]
-		//   - The first row is a header
-		//   - We want the first 4 columns as input, last 2 columns as label
-		// Adjust these indices to match your real spreadsheet
 		int rowCount = 0;
 		for (Row row : sheet) {
-			// skip header row
-			if (row.getRowNum() == 0) {
+			if (row.getRowNum() == 0) continue; // Skip header
+			if (rowCount >= recordsUsed) break;
+
+			// Read input feature columns
+			Cell idLeadCell                   = row.getCell(0);
+			Cell weeksElapsedSinceCreatedCell = row.getCell(1);
+			Cell weeksDiffPriorCell           = row.getCell(2);
+			Cell realLeadSumCell              = row.getCell(3);
+			Cell processWeekCell              = row.getCell(4);
+			Cell mktgGenCell                  = row.getCell(5);
+			Cell sectorCell                   = row.getCell(6);
+			Cell businessModelLeadCell        = row.getCell(7);
+			Cell amountCell                   = row.getCell(8);
+
+			// Target label columns (probConversion, probFallOff)
+			Cell labelConvCell     = row.getCell(9);
+			Cell labelFallOffCell  = row.getCell(10);
+
+			// Skip rows with missing data
+			if (idLeadCell == null || weeksElapsedSinceCreatedCell == null || weeksDiffPriorCell == null ||
+					realLeadSumCell == null || processWeekCell == null || mktgGenCell == null ||
+					sectorCell == null || businessModelLeadCell == null || amountCell == null ||
+					labelConvCell == null || labelFallOffCell == null) {
 				continue;
 			}
-			if (rowCount >= recordsUsed) break;
-			// read input
-			Cell magnitudeCell        = row.getCell(0);
-			Cell convCertaintyCell    = row.getCell(1);
-			Cell probConvertedCell    = row.getCell(2);
-			Cell probFallOffCell      = row.getCell(3);
-			Cell labelConvCell        = row.getCell(4);
-			Cell labelFallOffCell     = row.getCell(5);
 
-			if(magnitudeCell == null || convCertaintyCell == null ||
-					probConvertedCell == null || probFallOffCell == null ||
-					labelConvCell == null || labelFallOffCell == null) {
-				continue; // skip incomplete row
-			}
+			// Convert to float (with basic label encoding for strings)
+			float id_lead = (float) idLeadCell.getNumericCellValue();
+			float weeks_elapsed = (float) weeksElapsedSinceCreatedCell.getNumericCellValue();
+			float weeks_diff = (float) weeksDiffPriorCell.getNumericCellValue();
+			float real_lead_sum = (float) realLeadSumCell.getNumericCellValue();
+			float process_week = (float) processWeekCell.getNumericCellValue();
+			float mktg_gen = (float) mktgGenCell.getNumericCellValue();
+			float sector = (float) sectorCell.getNumericCellValue();
+			float businessModel = (float) businessModelLeadCell.getNumericCellValue();
+			float amount = (float) amountCell.getNumericCellValue();
 
-			// Extract numeric values (adjust to your cell types)
-			float magnitude     = (float) magnitudeCell.getNumericCellValue();
-			float convCertainty = (float) convCertaintyCell.getNumericCellValue();
-			float pConverted    = (float) probConvertedCell.getNumericCellValue();
-			float pFallOff      = (float) probFallOffCell.getNumericCellValue();
+			// Labels
+			float labelConvVal    = (float) labelConvCell.getNumericCellValue();
+			float labelFallOffVal = (float) labelFallOffCell.getNumericCellValue();
 
-			float labelConvVal   = (float) labelConvCell.getNumericCellValue();
-			float labelFallOffVal= (float) labelFallOffCell.getNumericCellValue();
+			// Feature vector: 9 inputs
+			float[] inArr = new float[]{
+					id_lead,
+					weeks_elapsed,
+					weeks_diff,
+					real_lead_sum,
+					process_week,
+					mktg_gen,
+					sector,
+					businessModel,
+					amount
+			};
 
-			// Build arrays
-			float[] inArr  = new float[]{magnitude, convCertainty, pConverted, pFallOff};
-			float[] outArr = new float[]{labelConvVal, labelFallOffVal};
+			float[] outArr = new float[]{ labelConvVal, labelFallOffVal };
 
 			featuresList.add(inArr);
 			labelsList.add(outArr);
-
 			rowCount++;
 		}
+
 		workbook.close();
 		fis.close();
 
-		// Create INDArray from the lists
 		int nRows = featuresList.size();
-		int nIn   = 4; // number of input columns
-		int nOut  = 2; // number of output columns
+		int nIn = 9;   // number of input features
+		int nOut = 2;  // number of output targets
 
 		INDArray featureMatrix = Nd4j.create(nRows, nIn);
 		INDArray labelMatrix   = Nd4j.create(nRows, nOut);
@@ -396,17 +415,17 @@ public class SalesPerson implements Steppable {
 		for (int i = 0; i < nRows; i++) {
 			float[] in  = featuresList.get(i);
 			float[] out = labelsList.get(i);
-
 			for (int j = 0; j < nIn; j++) {
-				featureMatrix.putScalar(new int[]{i,j}, in[j]);
+				featureMatrix.putScalar(new int[]{i, j}, in[j]);
 			}
 			for (int k = 0; k < nOut; k++) {
-				labelMatrix.putScalar(new int[]{i,k}, out[k]);
+				labelMatrix.putScalar(new int[]{i, k}, out[k]);
 			}
 		}
 
 		return new DataSet(featureMatrix, labelMatrix);
 	}
+
 
 	// ########################################################################
 	// Existing methods
@@ -423,6 +442,11 @@ public class SalesPerson implements Steppable {
 		int counter = 0;
 		float sumUtilities = 0;
 		float utility = 0;
+
+		for(int i=0; i<this.portfolio.size(); i++) {
+			Lead lead = this.portfolio.get(i);
+			lead.updateLeadProbs(true);
+		}
 					
 		for (int i = 0; i < this.portfolio.size(); i++ ) {
 			
@@ -643,8 +667,19 @@ public class SalesPerson implements Steppable {
 		Model model = (Model) state;
 		
 		currentStep = (int) model.schedule.getSteps();
+
+		// --------------------------------------------------
+		// PHASE 1: Train the NN once at the start of the simulation
+		// --------------------------------------------------
+		if (currentStep == 0 && !hasTrainedOnce) {
+			// Example: use 5 epochs, trainingRecordCount rows from /data_injection/ANNTrainingData.xlsx
+			trainNeuralNetworkFromExcel("data_injection/ANNTrainingData.xlsx",
+					9, // epochs
+					trainingRecordCount);
+			hasTrainedOnce = true;
+		}
 		
-		// PHASE 1: DECIDE HOW MANY HOURS TO WORK DEPENDING ON THE POPULATION AVERAGE (ONLY WHEN t>0)	
+		// PHASE 2: DECIDE HOW MANY HOURS TO WORK DEPENDING ON THE POPULATION AVERAGE (ONLY WHEN t>0)
 		if (currentStep > 0) {	
 			
 			// get the average with a 
@@ -657,25 +692,40 @@ public class SalesPerson implements Steppable {
 			
 		}
 
-		for (Lead lead : this.portfolio) {
-			lead.predictWithNN(this.nnManager, currentStep);
-		}
+		// PHASE 3: Define multiple strategies for sales person to choose, we specify strategy for each sales agent at the beginning of the simulation and will be following the same strategy throughout the simulation
+		// strategy 1: choose by magnitude size
+		// strategy 2: choose by conversion probability
+		// strategy 2: choose by Expected Value
 
 		// PHASE 2: DECIDE, FOR EVERY HOUR OF THE TIME-STEP (WEEK) THE LEADS TO WORK ON
+		// asish: 40 hours : 2 x 20 hours time blocks.
+		// asish: choose top 2 leads out of 3 lead (debug stage)
+		// 2 params number leads to choose: 2, total leads (portfolio size): 3
+		// selecting the top 2 leads based on the strategy chosen for selecting leads.
+
+
 		for (int h = 0; h < this.workingHours[currentStep]; h++ ) {
 			int chosenLead = this.decisionMakingLeadToWork(model.random);
 
 			// Update leads, marking which was worked on
 			for (int k = 0; k < this.portfolio.size(); k++) {
+				Lead ld = this.portfolio.get(k);
+
 				if (k == chosenLead) {
-					this.portfolio.get(k).updateLeadProbs(true);
+					ld.updateLeadProbs(true);
 				} else {
-					this.portfolio.get(k).updateLeadProbs(false);
+					// A simpler way to penalize leads that were not worked on:
+					// e.g. just add a small increase to probToFallOff, or use the old decay
+					float currentFallOff = ld.getProbToFallOff();
+					ld.setProbToFallOff( Math.min(1.0f, currentFallOff + 0.01f) );
+					// or any simpler approximate update
+					// NO neural net call here.
 				}
 			}
+
 		}
 		
-		// PHASE 3: UPDATE THE PROBS (ONLY IF SALESPEOPLE WERE WORKING ON IT A WEEK) OF THE PORTFOLIO TO ALSO COUNT THOSE CONVERTED AND FALLEN-OFF
+		// PHASE 4: UPDATE THE PROBS (ONLY IF SALESPEOPLE WERE WORKING ON IT A WEEK) OF THE PORTFOLIO TO ALSO COUNT THOSE CONVERTED AND FALLEN-OFF
 		this.updatePortfolio(state);		
 		this.calculatePayWithCompensation();		
 	}

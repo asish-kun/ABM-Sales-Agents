@@ -30,7 +30,7 @@ public class NeuralNetworkManager {
     }
 
     private MultiLayerNetwork buildNetwork(int numInputs) {
-        int hiddenSize = 16; // example
+        int hiddenSize = 4; // example
 
         MultiLayerConfiguration config = new NeuralNetConfiguration.Builder()
                 .seed(12345)
