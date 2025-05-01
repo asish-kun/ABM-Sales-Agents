@@ -414,10 +414,9 @@ public class Model extends SimState {
 
 		long ts = System.currentTimeMillis();
 		this.leadChoicesLogFile =
-				"./logs/agents/SalespeopleMicrOutput_"
+				"./logs/agents/SalespeopleMicrOutput_" + "_" + ts
 						+ params.getStringParameter("outputFile")
-						+ "_run" + this.MC_RUN
-						+ "_" + ts + ".txt";
+						+ "_run_" + this.MC_RUN + ".txt";
 				 
         // reset counter for KPIs
         for (int i = 0; i < (int) params.getIntParameter("maxSteps"); i++) {
