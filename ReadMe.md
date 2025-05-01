@@ -149,27 +149,6 @@ java -cp target/classes:./libraries/* view.ConsoleSimulation <paste above argume
 
 ---
 
-## 🧪 Testing Neural Network Setup (Sample Run)
-
-```bash
-java -jar ABM4Sales_FixedExpectedValues.jar \
-  -paramsFile config/ABM4Sales.properties \
-  -outputFile simpleTest_WithExpectedSales_A \
-  -portfolioSize 5 \
-  -avgRiskAversion 1 \
-  -stdevRiskAversion 0 \
-  -decayRateLeads 0.011 \
-  -thresholdForConversion 0.99 \
-  -MCRuns 30 \
-  -maxSteps 70 \
-  -nrAgents 163 \
-  -quota 0 \
-  -rateForBonus 0 \
-  -fileForLeads data_injection/parsed_filtered_Dataset_ABM_28APR2024_withAmountNorm.csv
-```
-
----
-
 ## ⚠️ Troubleshooting
 
 | Problem | Solution |
