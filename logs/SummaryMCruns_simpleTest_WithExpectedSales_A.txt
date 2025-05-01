@@ -1,1 +1,1 @@
-keyNameExp;simpleTest_WithExpectedSales_A;CLs;0.0000;0.0000;CLsByMag;0.0000;0.0000;FLs;495.4667;18.2399;Pay;0.0000;0.0000;PeopleWorkExtra;0.0000;0.0000;PeopleWithBonus;0.0000;0.0000;ExpectedCLs;325.5333;14.6037;ExpectedFLs;169.9333;10.0745;
+keyNameExp;simpleTest_WithExpectedSales_A;CLs;176.5714;16.0089;CLsByMag;15.7686;2.9458;FLs;21.7143;5.0238;Pay;0.5976;0.1404;PeopleWorkExtra;12.8571;2.6726;PeopleWithBonus;0.0000;0.0000;ExpectedCLs;127.0000;12.9615;ExpectedFLs;71.2857;10.2910;

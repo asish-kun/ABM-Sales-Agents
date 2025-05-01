@@ -20,7 +20,9 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Class of an agent SalesPerson of the ABM4Sales model
@@ -42,6 +44,7 @@ public class SalesPerson implements Steppable {
 
 	
 	private static final long serialVersionUID = 1L;
+	private final XoRoShiRo128PlusRandom random;
 
 	//--------------------------------- Fixed -------------------------------//
 						
@@ -80,9 +83,33 @@ public class SalesPerson implements Steppable {
 	// ---------------- NEW: Neural network for this salesperson ----------------
 	private NeuralNetworkManager nnManager;
 
-	private int trainingRecordCount = 600;
+	private int trainingRecordCount = 1500;
 
 	private boolean hasTrainedOnce = false;
+
+	private LinkedHashMap<Integer, Float> lastSortedLeads = new LinkedHashMap<>();
+	private LinkedHashMap<Integer, Float> lastChosenTop3  = new LinkedHashMap<>();
+
+	//TODO: map strategies with numbers for easy input.
+	public enum SalesStrategy {
+		HIGHEST_EXPECTED_VALUE,
+		HIGHEST_CONVERSION_PROB,
+		LARGEST_MAGNITUDE,
+		PROB_EXPECTED_VALUE,   // probability ∝ E_ij
+		PROB_CONV_PROB,        // probability ∝ p̂_ij^c
+		PROB_MAGNITUDE,        // probability ∝ m_ij
+		ESCALATION_OF_COMMITMENT,
+		RECENCY_WEIGHTED_RANDOM,
+		RANDOM_SELECTION
+	}
+
+	private SalesStrategy strategy;
+
+	private final float accuracy;
+	private int   leadsToChoose;
+	private int   myPortfolioSize;
+
+
 
 	//--------------------------- Get/Set methods ---------------------------//
 	
@@ -221,6 +248,39 @@ public class SalesPerson implements Steppable {
 	public void setDegree(int degree) {
 		this.degree = degree;
 	}
+
+	public void setNnManager(NeuralNetworkManager manager) {
+		this.nnManager = manager;
+	}
+
+	public void setStrategy(SalesStrategy strategy) {
+		this.strategy = strategy;
+	}
+
+	public SalesStrategy getStrategy(){return strategy;}
+
+	public void setStrategyByNumber(int num) {
+		switch(num) {
+			case 1: this.strategy = SalesStrategy.HIGHEST_EXPECTED_VALUE; break;
+			case 2: this.strategy = SalesStrategy.HIGHEST_CONVERSION_PROB;  break;
+			case 3: this.strategy = SalesStrategy.LARGEST_MAGNITUDE;       break;
+			case 4: this.strategy = SalesStrategy.PROB_EXPECTED_VALUE;       break;
+			case 5: this.strategy = SalesStrategy.PROB_CONV_PROB;       break;
+			case 6: this.strategy = SalesStrategy.PROB_MAGNITUDE;      break;
+			case 7: this.strategy = SalesStrategy.ESCALATION_OF_COMMITMENT;           break;
+			case 8: this.strategy = SalesStrategy.RECENCY_WEIGHTED_RANDOM;           break;
+			case 9: this.strategy = SalesStrategy.RANDOM_SELECTION;  break;
+
+			default: throw new IllegalArgumentException("Unknown strategy code: " + num);
+		}
+	}
+
+	public LinkedHashMap<Integer, Float> getLastSortedLeads() {
+		return lastSortedLeads;
+	}
+	public LinkedHashMap<Integer, Float> getLastChosenTop3() {
+		return lastChosenTop3;
+	}
 	
 	// ########################################################################
 	// Constructors
@@ -235,14 +295,27 @@ public class SalesPerson implements Steppable {
 //	 * @param _maxSteps the max steps of the simulation
 	 * 
 	 */
-	public SalesPerson(int _agentId, ModelParameters _params, XoRoShiRo128PlusRandom _random) { 
+	// inlucde this at the end to pass strategy to sales person : SalesStrategy strategy
+	public SalesPerson(
+			int _agentId,
+			ModelParameters _params,
+			XoRoShiRo128PlusRandom _random,
+			NeuralNetworkManager nnManager,
+			float agentAccuracy,
+			int   leadsToPick,
+			int   portfolioSize) {
 
 		this.gamerAgentId = _agentId;
 
 		// ---------------- NEW: Initialize the neural network manager -----------
 		// Example: Suppose we have 4 input features for [magnitude, convCertainty, probToBeConverted, probToFallOff],
 		// or any set of features that you want. Adjust as needed.
-		this.nnManager = new NeuralNetworkManager(9);
+		this.nnManager = nnManager;
+		this.random = _random;
+		//this.strategy = strategy;
+		this.accuracy      = agentAccuracy;
+		this.leadsToChoose = leadsToPick;
+		this.myPortfolioSize = portfolioSize;
 		
 		float _riskAv;
 
@@ -251,7 +324,7 @@ public class SalesPerson implements Steppable {
 			_riskAv = (float)(_params.getFloatParameter("avgRiskAversion")
 					+ _params.getFloatParameter("stdevRiskAversion") * standardNormal);
 		} while (_riskAv > 1 || _riskAv < 0);
-			
+
 		/*
 		do { 
 			_incrSucc = (float) _random.nextGaussian(_params.getFloatParameter("avgIncrSuccess"), 
@@ -281,150 +354,117 @@ public class SalesPerson implements Steppable {
 			this.fallOffLeads[i]  = 0.f;
 		}
 		
-		this.portfolio = new FastList <Lead> (_params.getIntParameter("portfolioSize"));
-		
 		this.rateForBonus = _params.getFloatParameter("rateForBonus");
-		
-		for (int i = 0; i < _params.getIntParameter("portfolioSize"); i++) {					
-			this.portfolio.add(new Lead (_random, _params, 0, this.nnManager));
-			
-			if (ModelParameters.DEBUG == true)
-				System.out.println("Portfolio pos " + i + " with lead: " + ((Lead)this.portfolio.get(i)).printStatsLead());
+
+		this.portfolio = new FastList<Lead>(this.myPortfolioSize);
+		for (int i = 0; i < this.myPortfolioSize; i++) {
+			this.portfolio.add(new Lead(_random, _params, 0, this.nnManager, this.accuracy));
 		}
-		
+		this.probOptions = new double[this.myPortfolioSize];
+
+
 		this.probOptions = new double[_params.getIntParameter("portfolioSize")];
+
+		// --------------------------------------------------
+		// PHASE 1: Train the NN once at the start of the simulation
+		// --------------------------------------------------
+//		if(!hasTrainedOnce) {
+//			trainNeuralNetworkFromExcel("data_injection/ANNTrainingData.xlsx",
+//					9, // epochs
+//					trainingRecordCount);
+//			hasTrainedOnce = true;
+//		}
+
 	}
 
-	// ########################################################################
-	// NEW: Training the neural network from an Excel file
-	// ########################################################################
-	/**
-	 * Loads training data from an Excel file and trains the neural network
-	 * with a chosen number of records and epochs.
-	 *
-	 * @param excelFilePath path to the .xlsx file
-	 * @param epochs how many passes to do over the subset of data
-	 * @param recordsUsed how many rows from the Excel to train on
-	 */
-	public void trainNeuralNetworkFromExcel(String excelFilePath, int epochs, int recordsUsed) {
-		try {
-			DataSet ds = loadDataFromExcel(excelFilePath, recordsUsed);
+	private float getFloatCell(Cell cell) {
+		if (cell == null) return 0.0f; // or some default value
+		return (float) cell.getNumericCellValue();
+	}
 
-			// Optionally scale/normalize your data:
-			NormalizerMinMaxScaler scaler = new NormalizerMinMaxScaler(0, 1);
-			scaler.fit(ds);
-			scaler.transform(ds);
+	public float getAccuracy() {
+		return this.accuracy;
+	}
 
-			nnManager.train(ds, epochs);
+	private float leadWeightRecency(Lead ld) {
+		int rec = ld.getWeeksSinceLastChosen(currentStep);
+		// weight ↑ if chosen recently, also ↑ with timesWorkedOn
+		return (1f / (1+rec)) + 0.1f*ld.getTimesWorkedOn();
+	}
 
-			if (ModelParameters.DEBUG) {
-				System.out.println("SalesPerson " + this.gamerAgentId
-						+ " finished NN training with " + recordsUsed
-						+ " records, for " + epochs + " epochs.");
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
+
+	// ---------------------------------------------------------------------
+// 1.1  New helper to compute “the metric I’m sorting by”  -------------
+// ---------------------------------------------------------------------
+	private float metricFor(Lead ld) {
+		switch (strategy) {
+			// Highest Expected Value, Prob of Conversion & Magnitude
+			case HIGHEST_CONVERSION_PROB:
+				return ld.getProbToBeConverted();
+			case HIGHEST_EXPECTED_VALUE:
+				return ld.getMagnitude() * ld.getProbToBeConverted();
+			case LARGEST_MAGNITUDE:
+				return ld.getMagnitude();
+			// new probabilistic strategies ↓ (added in §B)
+			case PROB_EXPECTED_VALUE:
+				return ld.getMagnitude() * ld.getProbToBeConverted();
+			case PROB_CONV_PROB:
+				return ld.getProbToBeConverted();
+			case PROB_MAGNITUDE:
+				return ld.getMagnitude();
+			// Commitment & Recency
+			case ESCALATION_OF_COMMITMENT:
+				return ld.getMagnitude() + ld.getConvCertainty();
+			case RECENCY_WEIGHTED_RANDOM:
+				return leadWeightRecency(ld);        // helper in §B‑4
+			default:
+				return 0f;          // RANDOM_SELECTION / fallback
 		}
 	}
 
-	/**
-	 * Load data from Excel (adjust columns as needed).
-	 * This is exactly as in your original code.
-	 */
-	private DataSet loadDataFromExcel(String excelFilePath, int recordsUsed) throws Exception {
-		FileInputStream fis = new FileInputStream(new File(excelFilePath));
-		Workbook workbook = new XSSFWorkbook(fis);
-		Sheet sheet = workbook.getSheetAt(0);
-
-		List<float[]> featuresList = new ArrayList<>();
-		List<float[]> labelsList   = new ArrayList<>();
-
-		int rowCount = 0;
-		for (Row row : sheet) {
-			if (row.getRowNum() == 0) continue; // Skip header
-			if (rowCount >= recordsUsed) break;
-
-			// Read input feature columns
-			Cell idLeadCell                   = row.getCell(0);
-			Cell weeksElapsedSinceCreatedCell = row.getCell(1);
-			Cell weeksDiffPriorCell           = row.getCell(2);
-			Cell realLeadSumCell              = row.getCell(3);
-			Cell processWeekCell              = row.getCell(4);
-			Cell mktgGenCell                  = row.getCell(5);
-			Cell sectorCell                   = row.getCell(6);
-			Cell businessModelLeadCell        = row.getCell(7);
-			Cell amountCell                   = row.getCell(8);
-
-			// Target label columns (probConversion, probFallOff)
-			Cell labelConvCell     = row.getCell(9);
-			Cell labelFallOffCell  = row.getCell(10);
-
-			// Skip rows with missing data
-			if (idLeadCell == null || weeksElapsedSinceCreatedCell == null || weeksDiffPriorCell == null ||
-					realLeadSumCell == null || processWeekCell == null || mktgGenCell == null ||
-					sectorCell == null || businessModelLeadCell == null || amountCell == null ||
-					labelConvCell == null || labelFallOffCell == null) {
-				continue;
-			}
-
-			// Convert to float (with basic label encoding for strings)
-			float id_lead = (float) idLeadCell.getNumericCellValue();
-			float weeks_elapsed = (float) weeksElapsedSinceCreatedCell.getNumericCellValue();
-			float weeks_diff = (float) weeksDiffPriorCell.getNumericCellValue();
-			float real_lead_sum = (float) realLeadSumCell.getNumericCellValue();
-			float process_week = (float) processWeekCell.getNumericCellValue();
-			float mktg_gen = (float) mktgGenCell.getNumericCellValue();
-			float sector = (float) sectorCell.getNumericCellValue();
-			float businessModel = (float) businessModelLeadCell.getNumericCellValue();
-			float amount = (float) amountCell.getNumericCellValue();
-
-			// Labels
-			float labelConvVal    = (float) labelConvCell.getNumericCellValue();
-			float labelFallOffVal = (float) labelFallOffCell.getNumericCellValue();
-
-			// Feature vector: 9 inputs
-			float[] inArr = new float[]{
-					id_lead,
-					weeks_elapsed,
-					weeks_diff,
-					real_lead_sum,
-					process_week,
-					mktg_gen,
-					sector,
-					businessModel,
-					amount
-			};
-
-			float[] outArr = new float[]{ labelConvVal, labelFallOffVal };
-
-			featuresList.add(inArr);
-			labelsList.add(outArr);
-			rowCount++;
+	// Draw *all* lead indices without replacement, using a custom weight fn
+	private List<Integer> drawByWeights(Function<Lead,Float> weightFn) {
+		int n = portfolio.size();
+		float[] w = new float[n];
+		float total = 0f;
+		for (int i=0;i<n;i++) {               // compute weights
+			w[i] = Math.max(1e-6f, weightFn.apply(portfolio.get(i)));
+			total += w[i];
 		}
-
-		workbook.close();
-		fis.close();
-
-		int nRows = featuresList.size();
-		int nIn = 9;   // number of input features
-		int nOut = 2;  // number of output targets
-
-		INDArray featureMatrix = Nd4j.create(nRows, nIn);
-		INDArray labelMatrix   = Nd4j.create(nRows, nOut);
-
-		for (int i = 0; i < nRows; i++) {
-			float[] in  = featuresList.get(i);
-			float[] out = labelsList.get(i);
-			for (int j = 0; j < nIn; j++) {
-				featureMatrix.putScalar(new int[]{i, j}, in[j]);
+		List<Integer> order = new ArrayList<>();
+		for (int pick = 0; pick < n; pick++) {
+			float r = random.nextFloat() * total;
+			float acc = 0f;
+			int sel = -1;
+			for (int i = 0; i < n; i++) {
+				if (w[i] == 0f) continue;
+				acc += w[i];
+				if (acc >= r) {
+					sel = i;
+					break;
+				}
 			}
-			for (int k = 0; k < nOut; k++) {
-				labelMatrix.putScalar(new int[]{i, k}, out[k]);
+			// <<< NEW: fallback if nothing matched
+			if (sel < 0) {
+				for (int i = 0; i < n; i++) {
+					if (w[i] > 0f) {
+						sel = i;
+						break;
+					}
+				}
 			}
+			// <<< still guard just in case
+			if (sel < 0) {
+				throw new RuntimeException("drawByWeights: no selectable index!");
+			}
+
+			order.add(sel);
+			total -= w[sel];
+			w[sel] = 0f;
 		}
-
-		return new DataSet(featureMatrix, labelMatrix);
+		return order;
 	}
+
 
 
 	// ########################################################################
@@ -437,63 +477,156 @@ public class SalesPerson implements Steppable {
 	 * @return the chosen lead by the salesperson
 	 * 
 	 */
-	private int decisionMakingLeadToWork (XoRoShiRo128PlusRandom _random) {
-		
-		int counter = 0;
-		float sumUtilities = 0;
-		float utility = 0;
-
-		for(int i=0; i<this.portfolio.size(); i++) {
-			Lead lead = this.portfolio.get(i);
-			lead.updateLeadProbs(true);
+	// ########################################################################
+	// NEW: Selecting Top Leads according to the chosen strategy
+	// ########################################################################
+	private void decisionMakingLeadToWork () {
+		// 1. Create a list of all indices in the portfolio
+		List<Integer> indices = new ArrayList<>();
+		for (int i = 0; i < this.portfolio.size(); i++) {
+			indices.add(i);
 		}
-					
-		for (int i = 0; i < this.portfolio.size(); i++ ) {
-			
-			Lead lead = this.portfolio.get(i);
-			
-			// calculate and save the utility (u = (1-r)*m*(1+B) - p_C)
-			
-			// calculate and save the utility (u = (1-r)*(1+B)*m/100 + r*convCert - \gamma p_C)
-			utility = (float) ((1. - this.riskAversion) * lead.getMagnitude() + this.riskAversion * lead.getProbToBeConverted());
-			
-			utility = (float)Math.exp(utility);
-						
-			//if (ModelParameters.DEBUG == true && this.gamerAgentId == 0) {
-				//System.out.println("A-" + this.gamerAgentId + " DM for lead" + i + ": convUnc=" + lead.getConvCertainty() + ", mag=" 
-					//	+ lead.getMagnitude() + "--> U = " + utility);
-			//}
-								
-			this.probOptions[counter] = utility;
-					
-			sumUtilities += utility;
-			
-			counter ++;		
 
-	    }
-		
-		// update probs by dividing by the sum
-		for (int i = 0; i < this.probOptions.length; i++) {
-			
-			if (this.probOptions[i] > 0)
-				this.probOptions[i] /= sumUtilities;
-			else
-				this.probOptions[i] = 0;
-			
-			/*if (ModelParameters.DEBUG == true && this.gamerAgentId == 0) {
-				System.out.println("prob lead " + i + " = " + this.probOptions[i] );
-			}*/
-
+		// 2. Sort indices based on selected strategy
+		switch (this.strategy) {
+			case HIGHEST_CONVERSION_PROB:
+				indices.sort((a, b) -> Float.compare(
+						portfolio.get(b).getPredictedProbToBeConverted(),
+						portfolio.get(a).getPredictedProbToBeConverted()
+				));
+				break;
+			case HIGHEST_EXPECTED_VALUE:
+				indices.sort((a, b) -> Float.compare(
+						portfolio.get(b).getMagnitude() * portfolio.get(b).getPredictedProbToBeConverted(),
+						portfolio.get(a).getMagnitude() * portfolio.get(a).getPredictedProbToBeConverted()
+				));
+				break;
+			case LARGEST_MAGNITUDE:
+				indices.sort((a, b) -> Float.compare(
+						portfolio.get(b).getMagnitude(),
+						portfolio.get(a).getMagnitude()
+				));
+				break;
+			case PROB_EXPECTED_VALUE:
+				indices = drawByWeights(l -> l.getMagnitude()*l.getPredictedProbToBeConverted());
+				break;
+			case PROB_CONV_PROB:
+				indices = drawByWeights(Lead::getPredictedProbToBeConverted);
+				break;
+			case PROB_MAGNITUDE:
+				indices = drawByWeights(Lead::getMagnitude);
+				break;
+			case RECENCY_WEIGHTED_RANDOM:
+				indices = drawByWeights(this::leadWeightRecency);
+				break;
+			case RANDOM_SELECTION:
+				shuffleWithXoRo(indices);
+				break;
+			case ESCALATION_OF_COMMITMENT:
+				// Weighted random, see the strategy in the next section (detailed below)
+				indices = weightedRandomSelection();
+				break;
+			default:
+				throw new IllegalArgumentException("Unknown strategy: " + this.strategy);
 		}
-		
-		// choose one at random
-		
-		int selectedOptionIndex = util.Functions.randomWeightedSelection 
-			(this.probOptions, _random.nextDouble()); // [0, 1)
-		
-		return selectedOptionIndex;
+
+		// 3. Store the entire sorted list in `lastSortedLeads`
+		//    (For random strategies, `indices` is the random order.)
+		lastSortedLeads.clear();
+		for(int idx : indices) {
+			Lead lead = portfolio.get(idx);
+			lastSortedLeads.put(lead.getID(), metricFor(lead));
+		}
+
+		// 4. Select top 3 leads to work on
+		List<Integer> topLeads = indices.subList(0, Math.min(this.leadsToChoose, indices.size()));
+
+		lastChosenTop3.clear();
+		for (int idx : topLeads) {
+			Lead lead = portfolio.get(idx);
+			lastChosenTop3.put(lead.getID(), metricFor(lead));
+		}
+
+		// 5. Actually update the leads we "worked on"
+		for (int i = 0; i < portfolio.size(); i++) {
+			Lead lead = portfolio.get(i);
+			boolean workedOn = topLeads.contains(i);
+			if (workedOn) {
+				lead.incrementTimesWorkedOn();
+				lead.noteChosen(currentStep);
+			}
+			lead.updateLeadProbs(workedOn);
+		}
+		if (ModelParameters.DEBUG) {
+			System.out.printf("Agent %d working on leads: %s\n", this.gamerAgentId, topLeads);
+		}
+    }
+
+	private void shuffleWithXoRo(List<Integer> list) {
+		for (int i = list.size() - 1; i > 0; i--) {
+			// pick a random index from 0..i
+			int r = this.random.nextInt(i + 1);
+			// swap
+			int tmp = list.get(i);
+			list.set(i, list.get(r));
+			list.set(r, tmp);
+		}
 	}
-	
+
+	private List<Integer> weightedRandomSelection() {
+		int size = portfolio.size();
+		float[] weights = new float[size];
+		float sumWeights = 0f;
+
+		// 1) Compute each lead's weight
+		//    EXAMPLE: escalation = (1 + timesWorkedOn),
+		//    or (magnitude + convCertainty), or combination
+		for (int i = 0; i < size; i++) {
+			Lead ld = portfolio.get(i);
+
+			// If you want to escalate with timesWorkedOn:
+			 float w = 1f + ld.getTimesWorkedOn();
+
+			// Or if you prefer some domain approach, e.g. magnitude + convCertainty:
+//			float w = ld.getMagnitude() + ld.getConvCertainty();
+
+			weights[i] = w;
+			sumWeights += w;
+		}
+
+		// 2) Repeatedly draw from the distribution (without replacement)
+		//    to pick 3 distinct leads
+		List<Integer> chosen = new ArrayList<>();
+		for (int pick = 0; pick < 3 && pick < size; pick++) {
+			// pick a random float in [0, sumWeights)
+			float r = this.random.nextFloat() * sumWeights;
+
+			// find which index that corresponds to
+			float accum = 0f;
+			int selectedIdx = -1;
+			for (int i = 0; i < size; i++) {
+				if (weights[i] <= 0f) {
+					// this lead was already selected in a previous pick
+					continue;
+				}
+				accum += weights[i];
+				if (accum >= r) {
+					selectedIdx = i;
+					break;
+				}
+			}
+
+			// Mark that index as chosen
+			chosen.add(selectedIdx);
+
+			// Remove it from distribution for the next pick
+			sumWeights -= weights[selectedIdx];
+			weights[selectedIdx] = 0f;
+		}
+
+		// 'chosen' is the final set of lead INDICES chosen by weighted random
+		return chosen;
+	}
 
 	/**
 	 * 
@@ -509,19 +642,27 @@ public class SalesPerson implements Steppable {
 		for (int i = 0; i < this.portfolio.size(); i++) {
 
 			boolean replaceLead = false;
-			
-			// check if converted
-			if (this.portfolio.get(i).getProbToBeConverted() 
-					>= model.params.getFloatParameter("thresholdForConversion")) {
-			
+
+			float  randomProbability = model.random.nextFloat();
+
+			//TODO: Will only do this check if it is a chosen lead
+			//TODO: Weather chosen or not fall off probability is constantly updated
+			//TODO: Compare it with the actual probability of conversion
+
+			if(randomProbability < this.portfolio.get(i).getProbToBeConverted()){
+
+//				System.out.printf("Lead %d CONVERTED! Prob: %.2f\n",
+//						this.portfolio.get(i).getID(),
+//						this.portfolio.get(i).getProbToBeConverted());
+
 				// lead obtained!!
 				this.convertedLeads[currentStep] += 1;
 
 				this.convertedLeadsByMagnitude[currentStep] += this.portfolio.get(i).getMagnitude();
-				
-				// if we have expected leads, we annotate if it was won 
+
+				// if we have expected leads, we annotate if it was won
 				if (model.params.isParameterSet("fileForLeads")) {
-					
+
 					if (this.portfolio.get(i).getFinalStatus() == ModelParameters.LEAD_IS_WON) {
 						this.expectedConvertedLeads[currentStep] += 1;
 					} else {
@@ -529,43 +670,106 @@ public class SalesPerson implements Steppable {
 						this.expectedFallOffLeads[currentStep] += 1;
 					}
 				}
-				
+
 				// check to replace to renew it
 				replaceLead = true;
-				
-				//if (ModelParameters.DEBUG == true) 
-					//System.out.println("A-" + this.gamerAgentId + ": Lead " + this.portfolio.get(i).getID() + " WON with pC = " + this.portfolio.get(i).getProbToBeConverted() + 
-						//	" and pF = " + this.portfolio.get(i).getProbToFallOff() + "Expected output was " + this.portfolio.get(i).getFinalStatus());
-				
-			} else {
-				
+
+				//if (ModelParameters.DEBUG == true)
+				//System.out.println("A-" + this.gamerAgentId + ": Lead " + this.portfolio.get(i).getID() + " WON with pC = " + this.portfolio.get(i).getProbToBeConverted() +
+				//	" and pF = " + this.portfolio.get(i).getProbToFallOff() + "Expected output was " + this.portfolio.get(i).getFinalStatus());
+
+			}else{
+
+
 				double r = model.random.nextDouble();
-				
-				if (r < this.portfolio.get(i).getProbToFallOff()) {
-					
+				float fallOffThresh = model.params.getFloatParameter("fallOffProbability");
+
+				if (r < fallOffThresh) {
+
 					// the lead falls-off
-					this.fallOffLeads[currentStep] += 1; 
+					this.fallOffLeads[currentStep] += 1;
 					//System.out.println("agent " + this.gamerAgentId + "; new falloff lead");
 
 					// if we have expected leads, we annotate if it was won (then, it will be a mismatch)
 					if (model.params.isParameterSet("fileForLeads")) {
-						
+
 						if (this.portfolio.get(i).getFinalStatus() == ModelParameters.LEAD_IS_WON) {
 							this.expectedConvertedLeads[currentStep] += 1;
 						} else {
 							// we annotate it as LOST (match)
 							this.expectedFallOffLeads[currentStep] += 1;
-						}						
+						}
 					}
-					
+
 					// check to replace to renew it
 					replaceLead = true;
 
-					//if (ModelParameters.DEBUG == true) 
-					//System.out.println("A-" + this.gamerAgentId + ": Lead " + this.portfolio.get(i).getID() + " FALLINGOFF with pC = " + this.portfolio.get(i).getProbToBeConverted() + 
-						//	" and pF = " + this.portfolio.get(i).getProbToFallOff() + "Expected output was " + this.portfolio.get(i).getFinalStatus());				
+					//if (ModelParameters.DEBUG == true)
+					//System.out.println("A-" + this.gamerAgentId + ": Lead " + this.portfolio.get(i).getID() + " FALLINGOFF with pC = " + this.portfolio.get(i).getProbToBeConverted() +
+					//	" and pF = " + this.portfolio.get(i).getProbToFallOff() + "Expected output was " + this.portfolio.get(i).getFinalStatus());
 				}
 			}
+			
+			// check if converted
+//			if (this.portfolio.get(i).getProbToBeConverted()
+//					>= model.params.getFloatParameter("thresholdForConversion")) {
+//
+//				System.out.printf("Lead %d CONVERTED! Prob: %.2f\n",
+//						this.portfolio.get(i).getID(),
+//						this.portfolio.get(i).getProbToBeConverted());
+//
+//				// lead obtained!!
+//				this.convertedLeads[currentStep] += 1;
+//
+//				this.convertedLeadsByMagnitude[currentStep] += this.portfolio.get(i).getMagnitude();
+//
+//				// if we have expected leads, we annotate if it was won
+//				if (model.params.isParameterSet("fileForLeads")) {
+//
+//					if (this.portfolio.get(i).getFinalStatus() == ModelParameters.LEAD_IS_WON) {
+//						this.expectedConvertedLeads[currentStep] += 1;
+//					} else {
+//						// we annotate it as LOST (mismatch)
+//						this.expectedFallOffLeads[currentStep] += 1;
+//					}
+//				}
+//
+//				// check to replace to renew it
+//				replaceLead = true;
+//
+//				//if (ModelParameters.DEBUG == true)
+//					//System.out.println("A-" + this.gamerAgentId + ": Lead " + this.portfolio.get(i).getID() + " WON with pC = " + this.portfolio.get(i).getProbToBeConverted() +
+//						//	" and pF = " + this.portfolio.get(i).getProbToFallOff() + "Expected output was " + this.portfolio.get(i).getFinalStatus());
+//
+//			} else {
+//
+//				double r = model.random.nextDouble();
+//
+//				if (r < this.portfolio.get(i).getProbToFallOff()) {
+//
+//					// the lead falls-off
+//					this.fallOffLeads[currentStep] += 1;
+//					//System.out.println("agent " + this.gamerAgentId + "; new falloff lead");
+//
+//					// if we have expected leads, we annotate if it was won (then, it will be a mismatch)
+//					if (model.params.isParameterSet("fileForLeads")) {
+//
+//						if (this.portfolio.get(i).getFinalStatus() == ModelParameters.LEAD_IS_WON) {
+//							this.expectedConvertedLeads[currentStep] += 1;
+//						} else {
+//							// we annotate it as LOST (match)
+//							this.expectedFallOffLeads[currentStep] += 1;
+//						}
+//					}
+//
+//					// check to replace to renew it
+//					replaceLead = true;
+//
+//					//if (ModelParameters.DEBUG == true)
+//					//System.out.println("A-" + this.gamerAgentId + ": Lead " + this.portfolio.get(i).getID() + " FALLINGOFF with pC = " + this.portfolio.get(i).getProbToBeConverted() +
+//						//	" and pF = " + this.portfolio.get(i).getProbToFallOff() + "Expected output was " + this.portfolio.get(i).getFinalStatus());
+//				}
+//			}
 				
 			if (replaceLead) {	
 				
@@ -573,14 +777,14 @@ public class SalesPerson implements Steppable {
 				if (model.params.isParameterSet("fileForLeads")) {
 					
 					// choose a lead from the list at random and set their values
-					this.portfolio.get(i).generateValuesFromLeadData (model.random, model.params, currentStep);
+					this.portfolio.get(i).generateValuesFromLeadData (model.random, model.params, currentStep, this.accuracy);
 					
 					//System.out.println("Salesperson pos " + this.gamerAgentId + " renewed portfolio with lead: " + ((Lead)this.portfolio.get(i)).printStatsLead());
 
 				} else 
 					
 					// generate at random as we don't have data
-					this.portfolio.get(i).generateValuesNewLeadAtRandom (model.random, model.params, currentStep);
+					this.portfolio.get(i).generateValuesNewLeadAtRandom (model.random, model.params, currentStep, this.accuracy);
 				
 			}
 	    }
@@ -667,17 +871,6 @@ public class SalesPerson implements Steppable {
 		Model model = (Model) state;
 		
 		currentStep = (int) model.schedule.getSteps();
-
-		// --------------------------------------------------
-		// PHASE 1: Train the NN once at the start of the simulation
-		// --------------------------------------------------
-		if (currentStep == 0 && !hasTrainedOnce) {
-			// Example: use 5 epochs, trainingRecordCount rows from /data_injection/ANNTrainingData.xlsx
-			trainNeuralNetworkFromExcel("data_injection/ANNTrainingData.xlsx",
-					9, // epochs
-					trainingRecordCount);
-			hasTrainedOnce = true;
-		}
 		
 		// PHASE 2: DECIDE HOW MANY HOURS TO WORK DEPENDING ON THE POPULATION AVERAGE (ONLY WHEN t>0)
 		if (currentStep > 0) {	
@@ -688,8 +881,7 @@ public class SalesPerson implements Steppable {
 			this.decideWeeklyWorkingHours(valueToCompareWith, model.params);			
 			
 		} else {			
-			this.workingHours[currentStep] = ModelParameters.WORKINGHOURSPERWEEK;			
-			
+			this.workingHours[currentStep] = ModelParameters.WORKINGHOURSPERWEEK;
 		}
 
 		// PHASE 3: Define multiple strategies for sales person to choose, we specify strategy for each sales agent at the beginning of the simulation and will be following the same strategy throughout the simulation
@@ -704,29 +896,38 @@ public class SalesPerson implements Steppable {
 		// selecting the top 2 leads based on the strategy chosen for selecting leads.
 
 
-		for (int h = 0; h < this.workingHours[currentStep]; h++ ) {
-			int chosenLead = this.decisionMakingLeadToWork(model.random);
+		// Choose top 3 leads once per week based on strategy
+		this.decisionMakingLeadToWork();
 
-			// Update leads, marking which was worked on
-			for (int k = 0; k < this.portfolio.size(); k++) {
-				Lead ld = this.portfolio.get(k);
-
-				if (k == chosenLead) {
-					ld.updateLeadProbs(true);
-				} else {
-					// A simpler way to penalize leads that were not worked on:
-					// e.g. just add a small increase to probToFallOff, or use the old decay
-					float currentFallOff = ld.getProbToFallOff();
-					ld.setProbToFallOff( Math.min(1.0f, currentFallOff + 0.01f) );
-					// or any simpler approximate update
-					// NO neural net call here.
-				}
-			}
-
-		}
+//		for (int h = 0; h < this.workingHours[currentStep]; h++ ) {
+//			int chosenLead = this.decisionMakingLeadToWork(model.random);
+//
+//			// Update leads, marking which was worked on
+//			for (int k = 0; k < this.portfolio.size(); k++) {
+//				Lead ld = this.portfolio.get(k);
+//
+//				ld.updateLeadProbs(k == chosenLead);
+////				if (k == chosenLead) {
+////
+////				} else {
+////					// A simpler way to penalize leads that were not worked on:
+////					// e.g. just add a small increase to probToFallOff, or use the old decay
+////					float currentFallOff = ld.getProbToFallOff();
+////					ld.setProbToFallOff( Math.min(1.0f, currentFallOff + 0.01f) );
+////					// or any simpler approximate update
+////					// NO neural net call here.
+////				}
+//			}
+//
+//		}
 		
 		// PHASE 4: UPDATE THE PROBS (ONLY IF SALESPEOPLE WERE WORKING ON IT A WEEK) OF THE PORTFOLIO TO ALSO COUNT THOSE CONVERTED AND FALLEN-OFF
 		this.updatePortfolio(state);		
-		this.calculatePayWithCompensation();		
+		this.calculatePayWithCompensation();
+
+		// Increment weeksElapsed for all leads in the portfolio
+		for (Lead lead : portfolio) {
+			lead.incrementWeeksElapsed();
+		}
 	}
 }

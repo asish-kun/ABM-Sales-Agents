@@ -3,6 +3,8 @@ package model;
 import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
 import view.LeadData;
 
+import static model.Model.log;
+
 /**
  * Class to store one lead which will belong to the portfolio of a salesperson
  * 
@@ -32,21 +34,35 @@ public class Lead {
 	// ------------  dynamic variables
 
 	private float probToBeConverted;		// \in [0,1]; the prob. of be converted by the salesperson
+	private float predictedProbToBeConverted;
+	public float getPredictedProbToBeConverted() {
+		return predictedProbToBeConverted;
+	}
+	public float pHat() { return predictedProbToBeConverted; }
 
-	private float probToFallOff;			// \in [0,1]; it is the probability to fall-off after not working on it
+	private float actualProbToBeConverted;
+
+	private float accuracy; // Accuracy for converting predicted -> actual. Provided by user param.
 
 	private NeuralNetworkManager nnManager;
+
+	private XoRoShiRo128PlusRandom random;
 
 	// asish: -------------- generate variable to match attributes in training data
 
 	private int weeksElapsed;          // weeks_elapsed_since_created
 	private int weeksDiffPrior;        // weeks_diff_prior
-	private float realLeadSum;         // real_lead_sum
 	private float processWeek;         // process_week
 	private float mktgGen;             // mktg_gen
 	private float encodedSector;       // sector (encoded)
-	private float encodedBusinessModel;// businessmodel_lead (encoded)
 	private float amount;              // amount (already present as 'magnitude', you can map or duplicate)
+	private float entryByWeek;       // entry_by_week
+	private float productService;    // product_service (0/1 encoded already)
+
+	private int timesWorkedOn = 0;
+
+	private int lastChosenStep = -1;
+	public void noteChosen(int step) { lastChosenStep = step; }
 
 	// Functions or methods of the class
 	// -----------------------------------------------
@@ -99,15 +115,6 @@ public class Lead {
 		this.probToBeConverted = probToBeConverted;
 	}
 
-	public float getProbToFallOff() {
-		//return (1 - this.probToBeConverted);
-		return this.probToFallOff;
-	}
-
-	public void setProbToFallOff(float probToFallOff) {
-		this.probToFallOff = probToFallOff;
-	}
-
 	public int getID() {
 		return ID;
 	}
@@ -123,13 +130,29 @@ public class Lead {
 	public void setFinalStatus(byte finalStatus) {
 		this.finalStatus = finalStatus;
 	}
+
+	public void incrementWeeksElapsed() {
+		this.weeksElapsed++;
+	}
+
+	public void incrementTimesWorkedOn() {
+		timesWorkedOn++;
+	}
+
+	public int getTimesWorkedOn() {
+		return timesWorkedOn;
+	}
+
+	public int getWeeksSinceLastChosen(int currentStep){
+		return (lastChosenStep<0)? Integer.MAX_VALUE : currentStep - lastChosenStep;
+	}
 	
 	//--------------------------- Constructor ---------------------------//
 	/**
 	 * constructor of Lead
 //	 * @param atRandom is to set magnitude & convCertainty at random
 	 */
-	public Lead (XoRoShiRo128PlusRandom _random, ModelParameters _params, int _step, NeuralNetworkManager nnManager){
+	public Lead (XoRoShiRo128PlusRandom _random, ModelParameters _params, int _step, NeuralNetworkManager nnManager, float agentAccuracy){
 		
 		this.ID = -1;
 		this.finalStatus = ModelParameters.LEAD_UNKNOWN_FINAL_STATUS;
@@ -139,17 +162,22 @@ public class Lead {
 		this.decayRate = 0.1;
 
 		this.nnManager = nnManager;
+
+		this.random = _random;
+
+		// If there is an "accuracy" parameter in the console, store it here.
+		this.accuracy = agentAccuracy;
 						
 		// we see if we have leads read from a file to get one
 		if (_params.isParameterSet("fileForLeads")) {			
 			
 			// choose a lead from the list at random and set their values			
-			generateValuesFromLeadData (_random, _params, _step);
+			generateValuesFromLeadData (_random, _params, _step, this.accuracy);
 			
 		} else {
 			
 			// generate those values at random
-			generateValuesNewLeadAtRandom (_random, _params, _step);
+			generateValuesNewLeadAtRandom (_random, _params, _step, this.accuracy);
 			
 		}
 		
@@ -163,13 +191,12 @@ public class Lead {
 	 * 
 	 * @param 
 	 */
-	public void generateValuesNewLeadAtRandom (XoRoShiRo128PlusRandom _random, ModelParameters _params, int _step){
+	public void generateValuesNewLeadAtRandom (XoRoShiRo128PlusRandom _random, ModelParameters _params, int _step, float agentAccuracy){
 
 		float _magnitude, _convCer;
 
-		this.probToBeConverted = 0;
-		this.probToFallOff     = 0;
-		this.stepWhenCreated   = _step;
+//		this.probToBeConverted = 0; // Check it's not affecting sales Agents performance
+//		this.probToFallOff     = 0; // Set it to the globally defined fall off value
 
 		// 1) Randomly pick an ID, business model, etc., from your CSV just as before:
 		LeadData _readLead = _params.getReadLeadAtRandom(_random.nextInt(_params.getNumberOfReadLeads()));
@@ -180,18 +207,20 @@ public class Lead {
 		// (Same code you had before...)
 
 		// 2) For the new variables, generate random values that make sense:
-		this.weeksElapsed   = _random.nextInt(30);  // e.g. anywhere from 0..29
-		this.weeksDiffPrior = _random.nextInt(5);   // e.g. 0..4
-		this.realLeadSum    = _random.nextFloat() * 5000f; // e.g. 0..5000
-		this.processWeek    = (float) _random.nextInt(12); // e.g. 0..11
+		this.weeksElapsed   = 0;
+		this.weeksDiffPrior = 0;
+		this.stepWhenCreated   = _step;
+//		this.processWeek    = (float) _random.nextInt(8); // e.g. 0..11
 		this.mktgGen        = _random.nextFloat();         // e.g. 0..1
 
 		// 3) Sectors and business models can be random picks or explicit encoding:
 		// Example: 0 = 'tech', 1 = 'finance', 2 = 'healthcare'
-		this.encodedSector = (float) _random.nextInt(3);
+		this.encodedSector = 1 + (float) _random.nextInt(20);
 
 		// Example: 0 = 'b2b', 1 = 'b2c'
-		this.encodedBusinessModel = (float) _random.nextInt(2);
+		this.productService = (float) _random.nextInt(2);
+
+		this.entryByWeek    = _random.nextFloat() * 20f;
 
 		// 4) If you want "amount" to be separate from "magnitude," you can do:
 		this.amount = _random.nextFloat() * 1000f; // random lead total in 0..1000
@@ -227,6 +256,14 @@ public class Lead {
 		_convCer = _random.nextFloat();  // Generates a value in [0, 1)
 
 		this.convCertainty = _convCer;
+
+		// ← insert here:
+		float[] feats = asNNFeatures();
+		float[] pred  = nnManager.predictScaled(feats);
+		this.predictedProbToBeConverted = pred[0];
+		this.probToBeConverted          = pred[0];
+//		this.probToFallOff              = 1.0f - _random.nextFloat();
+//		log.info("New random Lead @ step " + _step + ": " + printStatsLead());
 		
 	}
 
@@ -237,19 +274,84 @@ public class Lead {
 	 * 
 	 * @param 
 	 */
-	public void generateValuesFromLeadData (XoRoShiRo128PlusRandom _random, ModelParameters _params, int _step){
+	public void generateValuesFromLeadData (XoRoShiRo128PlusRandom _random, ModelParameters _params, int _step, float agentAccuracy){
 	
 		// initialization of the dynamics variables
 		this.probToBeConverted = 0;		
-		this.probToFallOff = 0; 	// initially, it was set to  1 - this.convCertainty but a lead falls-off quickly...Make more sense to start with 0, as p_c, while increasing it when not working on it
+//		this.probToFallOff = 0; 	// initially, it was set to  1 - this.convCertainty but a lead falls-off quickly...Make more sense to start with 0, as p_c, while increasing it when not working on it
 
 		this.stepWhenCreated = _step;
 		
 		// getting a random read data from the list
 		LeadData _readLead = _params.getReadLeadAtRandom(_random.nextInt(_params.getNumberOfReadLeads()));
-		
+
+		// weeksElapsed
+		String weeksElapsedStr = _readLead.getWeeksElapsed();
+		if (weeksElapsedStr == null) {
+			weeksElapsedStr = "0"; // default value for integer
+		}
+		this.weeksElapsed = Integer.parseInt(weeksElapsedStr);
+
+		// weeksDiffPrior
+		String weeksDiffPriorStr = _readLead.getWeeksDiffPrior();
+		if (weeksDiffPriorStr == null) {
+			weeksDiffPriorStr = "0";
+		}
+		this.weeksDiffPrior = Integer.parseInt(weeksDiffPriorStr);
+
+		// realLeadSum
+		String realLeadSumStr = _readLead.getRealLeadSum();
+		if (realLeadSumStr == null) {
+			realLeadSumStr = "0.0"; // default value for float
+		}
+
+		// processWeek
+		String processWeekStr = _readLead.getProcessWeek();
+		if (processWeekStr == null) {
+			processWeekStr = "0.0";
+		}
+		this.processWeek = Float.parseFloat(processWeekStr);
+
+		// mktgGen
+		String mktgGenStr = _readLead.getMktgGen();
+		if (mktgGenStr == null) {
+			mktgGenStr = "0.0";
+		}
+		this.mktgGen = Float.parseFloat(mktgGenStr);
+
+		// encodedSector
+		String encodedSectorStr = _readLead.getSector();
+		if (encodedSectorStr == null) {
+			encodedSectorStr = "0.0";
+		}
+		this.encodedSector = Float.parseFloat(encodedSectorStr);
+
+		// encodedBusinessModel
+		String encodedBusinessModelStr = _readLead.getBusinessModelEncoded();
+		if (encodedBusinessModelStr == null) {
+			encodedBusinessModelStr = "0.0";
+		}
+		this.productService = Float.parseFloat(encodedBusinessModelStr);
+
+		this.entryByWeek    = _random.nextFloat() * 20f;
+
+		// amount
+		String amountStr = _readLead.getAmount();
+		if (amountStr == null) {
+			amountStr = "0.0";
+		}
+		this.amount = Float.parseFloat(amountStr);
+
 		this.magnitude = Float.parseFloat(_readLead.getAmount());	
-		this.convCertainty = Float.parseFloat(_readLead.getCertaintyForConv());	
+		this.convCertainty = Float.parseFloat(_readLead.getCertaintyForConv());
+		// initialize both our prediction & “actual” p_conversion:
+		float[] feats = asNNFeatures();
+		float[] pred  = nnManager.predictScaled(feats);
+		this.predictedProbToBeConverted = pred[0];
+		this.probToBeConverted          = pred[0];
+
+		// set fall‑off = 1 – p_conversion
+//		this.probToFallOff = 1.0f - _random.nextFloat();
 		this.ID = Integer.parseInt(_readLead.getLeadID());
 		this.businessModel = _readLead.getBusinessModel();
 		
@@ -257,9 +359,21 @@ public class Lead {
 			this.finalStatus = ModelParameters.LEAD_IS_WON;
 		else
 			this.finalStatus = ModelParameters.LEAD_IS_LOST;
-		
+
+//		log.info("New file‐based Lead @ step " + _step + ": " + printStatsLead());
 	}
 
+	private float[] asNNFeatures() {
+		return new float[] {
+				weeksElapsed,
+				weeksDiffPrior,
+				entryByWeek,
+				amount,
+				encodedSector,
+				mktgGen,
+				productService
+		};
+	}
 
 	/**
 	 * 
@@ -267,21 +381,22 @@ public class Lead {
 	 * 
 	 */
 	public void updateLeadProbs(boolean hasWorked) {
-		float[] inputFeatures = new float[]{
-				hasWorked ? 1f : 0f,        // Optional binary feature
-				(float) weeksElapsed,
-				(float) weeksDiffPrior,
-				realLeadSum,
-				processWeek,
-				mktgGen,
-				encodedSector,
-				encodedBusinessModel,
-				amount
-		};
 
-		float[] prediction = this.nnManager.predict(inputFeatures);
-		this.probToBeConverted = prediction[0];
-		this.probToFallOff     = prediction[1];
+ 		//TODO:we will have 2 ProbOfConversion
+		//TODO: one is ActualProbability of Conversion, and one is predictedProbofConversion
+		// true probability is based of predicted probability
+		// and then use actual probability of conversion to check if a lead is converting or not
+		// Setting our own accuracy (parameter) - Will be inputed by the user
+
+		float[] feats = asNNFeatures();
+		float[] pred  = nnManager.predictScaled(feats);
+
+		this.predictedProbToBeConverted = pred[0];
+		this.probToBeConverted          = accuracy * pred[0];
+
+		// simple complimentary fall-off
+//		this.probToFallOff = 1f - this.probToBeConverted;
+
 	}
 
 
@@ -301,7 +416,7 @@ public class Lead {
 		result += "convCer = " + this.convCertainty + "; ";
 		result += "decayRate = " + this.decayRate+ "; ";
 		result += "probToBeConverted = " + this.probToBeConverted + "; ";
-		result += "probToFallOff = " + this.probToFallOff + "; ";
+//		result += "probToFallOff = " + 0.1 + "; ";
 
 		return result;
 		

@@ -1,13 +1,25 @@
 package model;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.deeplearning4j.eval.Evaluation;
+import org.nd4j.linalg.api.ndarray.INDArray;
+import org.nd4j.linalg.dataset.DataSet;
+import org.nd4j.linalg.dataset.api.preprocessor.NormalizerMinMaxScaler;
+import org.nd4j.evaluation.regression.RegressionEvaluation;
+import org.nd4j.linalg.factory.Nd4j;
 import sim.engine.*;
 import sim.util.*;
 
@@ -76,7 +88,12 @@ public class Model extends SimState {
 	float avgDegree;
 	
 	int MC_RUN = -1;
-	
+
+	//asish: Neural Network Variables
+	private static boolean HAS_TRAINED_GLOBALLY = false;
+	private static NeuralNetworkManager GLOBAL_NN_MANAGER = null;
+	private String leadChoicesLogFile;
+
 	
 	//--------------------------- Clone method ---------------------------//	
 	
@@ -289,6 +306,99 @@ public class Model extends SimState {
 			socialNetwork = null;
 		}			
 	}
+
+	private float getFloatCell(Cell cell) {
+		if (cell == null) return 0.0f; // or some default value
+		return (float) cell.getNumericCellValue();
+	}
+
+	private float decodeProb(int cls){ // 1→0 , 2→0.2 , 3→0.4 , 4→0.8
+		switch (cls){
+			case 1: return 0.0f;
+			case 2: return 0.2f;
+			case 3: return 0.4f;
+			case 4: return 0.8f;
+			default: return 0.2f;   // fallback = baseline
+		}
+	}
+
+	private org.nd4j.linalg.dataset.DataSet loadDataFromExcel(String excelFilePath, int recordsUsed) throws Exception {
+		FileInputStream fis = new FileInputStream(new File(excelFilePath));
+		Workbook workbook = new XSSFWorkbook(fis);
+		Sheet sheet = workbook.getSheetAt(0);
+
+		List<float[]> featuresList = new ArrayList<>();
+		List<float[]> labelsList   = new ArrayList<>();
+
+		int rowCount = 0;
+		for (Row row : sheet) {
+			if (row.getRowNum() == 0) continue; // Skip header
+			if (rowCount >= recordsUsed) break;
+
+			// Skip rows with missing data
+			try {
+				float weeksElapsed   = getFloatCell(row.getCell( 8));   // “weeks_elapsed”
+				float weeksDiffPrior = getFloatCell(row.getCell( 9));   // “weeks_diff_prior”
+				float entryByWeek    = getFloatCell(row.getCell(12));   // “entry_by_week”
+				float amount         = getFloatCell(row.getCell(27));   // “amount”
+				float sector         = getFloatCell(row.getCell(31));   // “sector” (already encoded 0-N)
+				float mktGen         = getFloatCell(row.getCell(33));   // “mkt_gen” (0/1)
+				float prodService    = getFloatCell(row.getCell(34));   // “product_service” (0/1)
+
+				float rawCls = getFloatCell(row.getCell(42));
+				float labelConv = decodeProb(Math.round(rawCls));   // “conversion_prob_week”
+//				float labelFallOffVal = getFloatCell(row.getCell(10));
+
+				// Read input feature columns
+				float[] inArr  = { weeksElapsed, weeksDiffPrior, entryByWeek,
+						amount, sector, mktGen, prodService };
+
+				float[] outArr = { labelConv };
+
+				featuresList.add(inArr);
+				labelsList.add(outArr);
+				rowCount++;
+
+			} catch (Exception ex) {
+				// Log and skip rows with truly unreadable numeric cells
+				System.out.println("Skipping row " + row.getRowNum() + " due to error: " + ex.getMessage());
+			}
+
+		}
+
+		System.out.println(">>> Final loaded training rows: " + featuresList.size());
+		if (featuresList.size() == 0) {
+			throw new RuntimeException("No usable data found even after fallback parsing.");
+		}
+
+		workbook.close();
+		fis.close();
+
+		int nRows = featuresList.size();
+		int nIn = 7;   // number of input features
+		int nOut = 1;  // number of output targets
+
+		System.out.println(">>> Loaded rows: " + nRows);
+		if (nRows == 0) {
+			System.err.println("ERROR: No valid rows loaded from Excel. Check for missing cells or empty file.");
+		}
+
+		INDArray featureMatrix = Nd4j.create(nRows, nIn);
+		INDArray labelMatrix   = Nd4j.create(nRows, nOut);
+
+		for (int i = 0; i < nRows; i++) {
+			float[] in  = featuresList.get(i);
+			float[] out = labelsList.get(i);
+			for (int j = 0; j < nIn; j++) {
+				featureMatrix.putScalar(new int[]{i, j}, in[j]);
+			}
+			for (int k = 0; k < nOut; k++) {
+				labelMatrix.putScalar(new int[]{i, k}, out[k]);
+			}
+		}
+
+		return new org.nd4j.linalg.dataset.DataSet(featureMatrix, labelMatrix);
+	}
 		
 	
 	//--------------------------- SimState methods --------------------------//
@@ -301,6 +411,13 @@ public class Model extends SimState {
 		super.start();
 		
 		this.MC_RUN ++;
+
+		long ts = System.currentTimeMillis();
+		this.leadChoicesLogFile =
+				"./logs/agents/SalespeopleMicrOutput_"
+						+ params.getStringParameter("outputFile")
+						+ "_run" + this.MC_RUN
+						+ "_" + ts + ".txt";
 				 
         // reset counter for KPIs
         for (int i = 0; i < (int) params.getIntParameter("maxSteps"); i++) {
@@ -316,6 +433,53 @@ public class Model extends SimState {
 		        
         final int FIRST_SCHEDULE = 0;
         int scheduleCounter = FIRST_SCHEDULE;
+
+		//(1) Initialize Neural Network
+		if (!HAS_TRAINED_GLOBALLY) {
+			// For example, you can define your training file, # epochs, etc.
+			// Or read them from 'params' if you have them in your .properties or arguments:
+			String excelPath  = "data_injection/abm_training_data.xlsx";
+			int epochs        = 20;
+			int recordsToUse  = 39000;
+
+			// (a) Load training data
+			DataSet ds = null;
+			try {
+				ds = loadDataFromExcel(excelPath, recordsToUse);
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+			// (b) Fit + transform
+			NormalizerMinMaxScaler scaler = new NormalizerMinMaxScaler(0,1);
+			scaler.fit(ds);
+			scaler.transform(ds);
+
+			// (c) Build manager + train
+			NeuralNetworkManager localNN = new NeuralNetworkManager(7);
+			localNN.train(ds, epochs, scaler);
+
+			// (d) Assign them to static fields
+			GLOBAL_NN_MANAGER = localNN;
+			HAS_TRAINED_GLOBALLY = true;
+
+			// Optional debug print:
+			System.out.println("[Model.start()] Completed global NN training once, with "
+					+ recordsToUse + " rows for " + epochs + " epochs.");
+
+			//Evaluating model after training
+			RegressionEvaluation regEval = new RegressionEvaluation(1);
+			INDArray features    = ds.getFeatures();
+			INDArray labels       = ds.getLabels();
+			INDArray preds        = GLOBAL_NN_MANAGER.getModel().output(features);
+			regEval.eval(labels, preds);
+			System.out.println("Training MSE  = " + regEval.meanSquaredError(0));
+			System.out.println("Training MAE  = " + regEval.meanAbsoluteError(0));
+		}
+
+		// --------  NEW  : parse the three per-agent arrays  -------
+		Float[]  accArr    = splitFloatArray(params, "agentAccuracies");
+		Integer[] kArr     = splitIntArray(params, "agentLeadChoices");
+		Integer[] pSizeArr = splitIntArray(params, "agentPortfolioSizes");
         
         
 		// at random, create an array with the IDs unsorted. 
@@ -324,37 +488,60 @@ public class Model extends SimState {
 		// IMPORTANT! IDs of the SN nodes and agents must be the same to avoid BUGS!!
 		    
 		
-        // Initialization of the agents
-        agents = new Bag();
-        		
-		// select the nodes by degree when having seeding Ps
-        for (int i = 0; i < (int) params.getIntParameter("nrAgents"); i++) {
-        	       	               
-            // generate the agent, push in the bag, and schedule
-            SalesPerson cl = generateAgent (i);  
-                                    
-            // Add agent to the list and schedule
-            agents.add(cl);
-            
-            // Add agent to the schedule
-            schedule.scheduleRepeating(Schedule.EPOCH, scheduleCounter, cl);             
-        }       
-         
-        // shuffle agents in the Bag and later, reassign the id to the position in the bag        
-        agents.shuffle(this.random);
-                
-          
-        // assign shuffled IDs to agents and set their parameters
-        for (int agentId = 0; agentId < agents.size(); agentId++) {
+        //(2) Initialization of the agents
+		agents = new Bag();
+		int nrAgents = params.getIntParameter("nrAgents");
 
-        	((SalesPerson) agents.get(agentId)).setGamerAgentId(agentId);
-        
-        	if (params.network)
-        		
-        		// set the degree of the agent
-        		((SalesPerson) agents.get(agentId)).setDegree(socialNetwork.getNeighborsOfNode(agentId).size());
-        	      	
-        }	          
+		// Get agent strategies from parameter string like "1,2,1,3"
+		String agentStrats = params.getStringParameter("agentStrategies");
+		String[] tokens = (agentStrats != null) ? agentStrats.split(",") : new String[0];
+
+		// 1) CREATE + SCHEDULE everyone, but **do not** assign any strategy yet
+		for (int i = 0; i < nrAgents; i++) {
+			float acc = (i < accArr.length)   ? accArr[i]   : 1.0f;
+			int   k   = (i < kArr.length)     ? kArr[i]     : 3;
+			int   pSz = (i < pSizeArr.length) ? pSizeArr[i] : params.getIntParameter("portfolioSize");
+
+			SalesPerson sp = new SalesPerson(i, params, random, GLOBAL_NN_MANAGER, acc, k, pSz);
+			agents.add(sp);
+			schedule.scheduleRepeating(sp);
+		}
+
+		// shuffle agents in the Bag and later, reassign the id to the position in the bag
+        agents.shuffle(this.random);
+
+
+
+
+		// 3) NOW assign gamerAgentId, degree AND strategy in the *shuffled* order
+		for (int agentId = 0; agentId < agents.size(); agentId++) {
+			SalesPerson sp = (SalesPerson) agents.get(agentId);
+
+			// reset the agent’s ID to match its new position
+			sp.setGamerAgentId(agentId);
+
+			// if you’re using a social network, update degree too
+			if (params.network) {
+				int deg = socialNetwork.getNeighborsOfNode(agentId).size();
+				sp.setDegree(deg);
+			}
+
+			// finally, map the i‑th token onto the i‑th shuffled agent
+			if (agentId < tokens.length) {
+				try {
+					int code = Integer.parseInt(tokens[agentId].trim());
+					sp.setStrategyByNumber(code);
+				} catch (NumberFormatException ex) {
+					System.err.println("Bad strat code for agent "
+							+ agentId + ": "
+							+ tokens[agentId]);
+					sp.setStrategyByNumber(0);
+				}
+			} else {
+				// fallback default
+				sp.setStrategyByNumber(0);
+			}
+		}
                 	
         // Add anonymous agent to calculate statistics
         setAnonymousAgentApriori(scheduleCounter);
@@ -362,6 +549,20 @@ public class Model extends SimState {
                            
         setAnonymousAgentAposteriori(scheduleCounter);              
 			
+	}
+
+	private static Float[] splitFloatArray(ModelParameters p, String key) {
+		if (!p.isParameterSet(key)) return new Float[0];
+		return Arrays.stream(p.getStringParameter(key).split(","))
+				.map(String::trim).filter(s->!s.isEmpty())
+				.map(Float::parseFloat).toArray(Float[]::new);
+	}
+
+	private static Integer[] splitIntArray(ModelParameters p, String key) {
+		if (!p.isParameterSet(key)) return new Integer[0];
+		return Arrays.stream(p.getStringParameter(key).split(","))
+				.map(String::trim).filter(s->!s.isEmpty())
+				.map(Integer::parseInt).toArray(Integer[]::new);
 	}
 
 
@@ -374,12 +575,12 @@ public class Model extends SimState {
 	 * @param _nodeId is the id of the agent
 	 * @return the agent created by the method
 	 */
-	private SalesPerson generateAgent(int _nodeId) {
-		
-		SalesPerson  cl = new SalesPerson (_nodeId, params, random);
-									
-		return cl;
-	}	
+//	private SalesPerson generateAgent(int _nodeId) {
+//
+//		SalesPerson  cl = new SalesPerson (_nodeId, params, random, GLOBAL_NN_MANAGER);
+//
+//		return cl;
+//	}
 	
 	/**
 	 * Adds the anonymous agent to schedule (at the beginning of each step), 
@@ -395,11 +596,70 @@ public class Model extends SimState {
 			private static final long serialVersionUID = -2837885990121299044L;
 
 			public void step(SimState state) {
-			
+				int currentStep = (int) schedule.getSteps();
+
+				// 1. Update your aggregated KPI counters
+				updateKPIsCounting(currentStep);
+
+				// 2. Log each agent’s sorted leads & chosen top‐3 to a file
+				//    (Do this every step except maybe step == 0 if you want)
+				if (currentStep >= 0) {
+					appendLeadChoicesToFile(currentStep);
+				}
+
+				// 3. If final step, do final prints
+				if (currentStep == params.getIntParameter("maxSteps") - 1) {
+					// ... your existing final-step code ...
+					plotSaveAdditionalInfo(currentStep);
+				}
 			}			
 		});				
 	}
-		
+
+	private void appendLeadChoicesToFile(int currentStep) {
+		// Be sure to open in APPEND mode
+		File file = new File(leadChoicesLogFile);
+
+		try (PrintWriter pw = new PrintWriter(new FileOutputStream(file, true))) {
+			// For each agent
+			for (int i = 0; i < agents.size(); i++) {
+				SalesPerson sp = (SalesPerson) agents.get(i);
+
+				// Build a CSV string of their sorted lead IDs:
+				StringBuilder sortedSB = new StringBuilder();
+				for (Map.Entry<Integer,Float> e : sp.getLastSortedLeads().entrySet()) {
+					sortedSB.append("(")
+							.append(e.getKey()).append(",")
+							.append(String.format("%.4f", e.getValue()))
+							.append("),");
+				}
+				if (sortedSB.length() > 0) sortedSB.setLength(sortedSB.length() - 1);
+
+// Build a CSV of the top 3 chosen plus metric
+				StringBuilder top3SB = new StringBuilder();
+				for (Map.Entry<Integer,Float> e : sp.getLastChosenTop3().entrySet()) {
+					top3SB.append("(")
+							.append(e.getKey()).append(",")
+							.append(String.format("%.4f", e.getValue()))
+							.append("),");
+				}
+				if (top3SB.length() > 0) top3SB.setLength(top3SB.length() - 1);
+
+				// Print line: step; agentId; sortedLeads; chosenTop3
+				pw.println(
+						currentStep + ";" +
+								sp.getGamerAgentId() + ";" +
+								sp.getStrategy() + ";" +
+								"[" + sortedSB.toString() + "];" +
+								"[" + top3SB.toString() + "]"
+				);
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
+
 
 	/**
 	 * Counts the KPI output at each time-step depending on the agents' information
@@ -512,18 +772,21 @@ public class Model extends SimState {
 		// here, we save information about all the sales and info agent by agent
 		if ((ModelParameters.OUTPUT_SALESPEOPLE_INFO) && (_currentStep == ((int) params.getIntParameter("maxSteps") - 1))) {
 
-			try {
+			File fileStrength = new File(leadChoicesLogFile);
 
-				// save
-				File fileStrength = new File("./logs/agents/" + "SalespeopleMicrOutput_" 
-						+ params.getStringParameter("outputFile") + "." + this.MC_RUN + ".txt");
-				
-				PrintWriter printWriter = new PrintWriter(fileStrength);
+// Open in APPEND mode (true)
+			try (PrintWriter printWriter = new PrintWriter(new FileOutputStream(fileStrength, true))) {
 
-				printWriter.write("agentId;riskAversion;aggrConvertedLeads;aggrExpectedConvertedLeads;aggrExpectedFallOffLeads;aggrConvertedLeadsByMag;aggrPay;aggrFallOffLeads\n");
+				// Optionally print a small header or separator to show
+				// these lines are final aggregates, e.g.:
+				printWriter.println();
+				printWriter.println("=== FINAL AGGREGATE RESULTS ===");
+				printWriter.println("agentId;riskAversion;strategy;accuracy;aggrConvertedLeads;aggrExpectedConvertedLeads;"
+						+ "aggrExpectedFallOffLeads;aggrConvertedLeadsByMag;aggrPay;aggrFallOffLeads");
 
-				// loop for all the agents
-				for (int i = 0; i < (int)params.getIntParameter("nrAgents"); i++) {
+				// Then loop over each SalesPerson as before and write the final lines
+				for (int i = 0; i < params.getIntParameter("nrAgents"); i++) {
+					SalesPerson sp = (SalesPerson) agents.get(i);
 
 					float aggrConvertedLeads = 0;
 					float aggrExpectedConvertedLeads = 0;
@@ -531,31 +794,34 @@ public class Model extends SimState {
 					float aggrConvertedLeadsByMag = 0;
 					float aggrPay = 0;
 					float aggrFallOffLeads = 0;
-					
-					for (int k = 0; k < (int)params.getIntParameter("maxSteps"); k++) {
-					
-						aggrConvertedLeads += ((SalesPerson) agents.get(i)).getConvertedLeadsAtStep(k);
-						aggrExpectedConvertedLeads += ((SalesPerson) agents.get(i)).getExpectedConvertedLeadsAtStep(k);
-						aggrExpectedFallOffLeads += ((SalesPerson) agents.get(i)).getExpectedFallOffLeadsAtStep(k);
-						aggrConvertedLeadsByMag += ((SalesPerson) agents.get(i)).getConvertedLeadsByMagnitudeAtStep(k);
-						aggrPay += ((SalesPerson) agents.get(i)).getPayAtStep(k);
-						aggrFallOffLeads += ((SalesPerson) agents.get(i)).getFallOffLeadsAtStep(k);
+
+					for (int k = 0; k < params.getIntParameter("maxSteps"); k++) {
+						aggrConvertedLeads += sp.getConvertedLeadsAtStep(k);
+						aggrExpectedConvertedLeads += sp.getExpectedConvertedLeadsAtStep(k);
+						aggrExpectedFallOffLeads += sp.getExpectedFallOffLeadsAtStep(k);
+						aggrConvertedLeadsByMag += sp.getConvertedLeadsByMagnitudeAtStep(k);
+						aggrPay += sp.getPayAtStep(k);
+						aggrFallOffLeads += sp.getFallOffLeadsAtStep(k);
 					}
-										
-					// print all the aggregated info for the agent
-					printWriter.write(i + ";" + ((SalesPerson) agents.get(i)).getRiskAversion() + ";" + aggrConvertedLeads + ";" + aggrExpectedConvertedLeads + ";"
-							 + aggrExpectedFallOffLeads + ";" + aggrConvertedLeadsByMag + ";" + aggrPay + ";" + aggrFallOffLeads + "\n");
-				
+
+					printWriter.println(
+							i + ";"
+									+ sp.getRiskAversion() + ";"
+									+ sp.getStrategy().name() + ";"
+									+ sp.getAccuracy() + ";"
+									+ aggrConvertedLeads + ";"
+									+ aggrExpectedConvertedLeads + ";"
+									+ aggrExpectedFallOffLeads + ";"
+									+ aggrConvertedLeadsByMag + ";"
+									+ aggrPay + ";"
+									+ aggrFallOffLeads
+					);
 				}
-
-				printWriter.close();
-
 			} catch (FileNotFoundException e) {
-
 				e.printStackTrace();
 				log.log(Level.SEVERE, e.toString(), e);
 			}
-			
+
 		}	
 				
 	}

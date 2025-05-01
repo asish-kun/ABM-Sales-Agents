@@ -44,7 +44,7 @@ public class ModelParameters {
 	public static boolean DEBUG = false;
 
 	// outputing extra information at the end of the simulation
-	public static boolean OUTPUT_SALESPEOPLE_INFO = false; 
+	public static boolean OUTPUT_SALESPEOPLE_INFO = true;
 	
 	// constants to get different options for simple or SA runs
 	public final static byte NO_SA = 0;

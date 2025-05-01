@@ -71,6 +71,23 @@ public class ConsoleSimulation {
 				
 		options.addOption("SNFile", true, "File with the SN to run");
 
+		// NEW: user-specified accuracy
+		options.addOption("accuracy", true, "Accuracy factor for actual vs predicted prob");
+
+		// NEW: user-specified strategies, Accuracies, Chosen Leads and Portfolio Size for each sales agent
+		options.addOption("agentStrategies", true,
+				"Comma or bracketed list of strategy codes for each agent, e.g. [1,2,3]");
+		options.addOption("agentAccuracies",     true,
+				"Comma or bracketed float list – one accuracy per agent");
+		options.addOption("agentLeadChoices",    true,
+				"Comma / bracketed int list – #leads each agent works weekly");
+		options.addOption("agentPortfolioSizes", true,
+				"Comma / bracketed int list – portfolio size per agent");
+		options.addOption(
+				"fallOffProbability", true,
+				"Constant fall-off probability for all leads (e.g. 0.1 for 10%)");
+
+
 		options.addOption("SA_avgLeadsMagnitude", false, "SA on lead magnitude mean for Normal generation");
 		options.addOption("SA_stdevLeadsMagnitude", false, "SA on lead magnitude stdev. for Normal generation");
 		options.addOption("SA_avgRiskAversion", false, "SA on risk aversion for the salespeople");
@@ -172,9 +189,48 @@ public class ConsoleSimulation {
 					System.err.println("ConsoleSimulation: Error with SN file when loading parameters for the simulation " + line.getOptionValue("SNFile") + "\n"
 							+ e.getMessage());
 					e.printStackTrace(new PrintWriter(System.err));
-				}  
-		  		   
-		    // specific parameters of the model
+				}
+
+
+			// NEW: if we have "accuracy" param
+			if(line.hasOption("accuracy")) {
+				params.setParameterValue("accuracy", Float.parseFloat(line.getOptionValue("accuracy")));
+			}
+
+			// NEW: if we have "agentStrategies"
+			if(line.hasOption("agentStrategies")) {
+				// e.g. -agentStrategies "[1,2,1,3]"
+				// parse the string into an int array
+				String rawStr = line.getOptionValue("agentStrategies")
+						.replace("[","").replace("]","");
+				// e.g. "1,2,1,3"
+				params.setParameterValue("agentStrategies", rawStr);
+			}
+
+			// NEW: if we have "agentAccuracies"
+			if (line.hasOption("agentAccuracies"))
+				params.setParameterValue("agentAccuracies",
+						line.getOptionValue("agentAccuracies").replace("[","").replace("]",""));
+
+			// NEW: if we have "agentLeadChoices"
+			if (line.hasOption("agentLeadChoices"))
+				params.setParameterValue("agentLeadChoices",
+						line.getOptionValue("agentLeadChoices").replace("[","").replace("]",""));
+
+			// NEW: if we have "agentPortfolioSizes"
+			if (line.hasOption("agentPortfolioSizes"))
+				params.setParameterValue("agentPortfolioSizes",
+						line.getOptionValue("agentPortfolioSizes").replace("[","").replace("]",""));
+
+			// after reading fallOffProbability parameter:
+			if (line.hasOption("fallOffProbability")) {
+				params.setParameterValue(
+						"fallOffProbability",
+						Float.parseFloat(line.getOptionValue("fallOffProbability"))
+				);
+			}
+
+			// specific parameters of the model
 
 		    if( line.hasOption( "distributionForLeads" ) ) 		    	
 		    	params.setParameterValue("distributionForLeads", Integer.parseInt(line.getOptionValue("distributionForLeads")));

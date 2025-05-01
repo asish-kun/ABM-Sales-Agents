@@ -28,8 +28,74 @@ public class LeadData {
 	private String WeekCommit80;
 	private String CertaintyForConv;
 	private String ConvertedLead;
-	
-	
+
+	//Asish: NEW FIELDS FOR NEURAL NETWORK INPUT FEATURES
+
+	private String weeksElapsed;          // weeks_elapsed_since_created
+	private String weeksDiffPrior;        // weeks_diff_prior
+	private String realLeadSum;           // real_lead_sum
+	private String processWeek;           // process_week
+	private String mktgGen;               // mktg_gen (marketing-generated flag)
+	private String sector;                // sector (raw string)
+	private String businessModelEncoded;  // businessmodel_lead (encoded as float)
+
+	// Getters and setters for new fields
+	public String getWeeksElapsed() {
+		return weeksElapsed;
+	}
+
+	public void setWeeksElapsed(String weeksElapsed) {
+		this.weeksElapsed = weeksElapsed;
+	}
+
+	public String getWeeksDiffPrior() {
+		return weeksDiffPrior;
+	}
+
+	public void setWeeksDiffPrior(String weeksDiffPrior) {
+		this.weeksDiffPrior = weeksDiffPrior;
+	}
+
+	public String getRealLeadSum() {
+		return realLeadSum;
+	}
+
+	public void setRealLeadSum(String realLeadSum) {
+		this.realLeadSum = realLeadSum;
+	}
+
+	public String getProcessWeek() {
+		return processWeek;
+	}
+
+	public void setProcessWeek(String processWeek) {
+		this.processWeek = processWeek;
+	}
+
+	public String getMktgGen() {
+		return mktgGen;
+	}
+
+	public void setMktgGen(String mktgGen) {
+		this.mktgGen = mktgGen;
+	}
+
+	public String getSector() {
+		return sector;
+	}
+
+	public void setSector(String sector) {
+		this.sector = sector;
+	}
+
+	public String getBusinessModelEncoded() {
+		return businessModelEncoded;
+	}
+
+	public void setBusinessModelEncoded(String businessModelEncoded) {
+		this.businessModelEncoded = businessModelEncoded;
+	}
+
 	// getters and setters of the attributes
 	public String getLeadID() {
 		return LeadID;
@@ -153,7 +219,15 @@ public class LeadData {
 	
 	@Override
 	public String toString() {
-		return "{" + LeadID + "::" + Amount + "::" + BusinessModel + "::" + WeekCreated + "::" + WeekClosed  + "::" + WeekLost 
+		return "{" + LeadID + "::" + Amount + "::" + BusinessModel +
+				", weeksElapsed='" + weeksElapsed + '\'' +
+				", weeksDiffPrior='" + weeksDiffPrior + '\'' +
+				", realLeadSum='" + realLeadSum + '\'' +
+				", processWeek='" + processWeek + '\'' +
+				", mktgGen='" + mktgGen + '\'' +
+				", sector='" + sector + '\'' +
+				", businessModelEncoded='" + businessModelEncoded + '\'' +
+				"::" + WeekCreated + "::" + WeekClosed  + "::" + WeekLost
 				+ "::" + WeekWon + "::" + WeekUnlikely0 + "::" + WeekPipeline20 + WeekBestCase40 + "::" + WeekCommit80 + "::" + CertaintyForConv + "::" + ConvertedLead +"}";
 	}
 		
