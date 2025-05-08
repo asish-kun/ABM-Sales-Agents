@@ -1,0 +1,34 @@
+Log file created at 1746732756310 (System Time Millis)
+
+** Starting MC agent-based simulation (ABM4Sales)
+
+MC_runs = 5
+seed = 18937883
+nrAgents = 10
+maxSteps = 70
+Base working hours a week] = 40
+Network? = false
+SNFile = null
+------
+portfolioSize = 50.0
+avgRiskAversion = 1.0
+stdevRiskAversion = 0.0
+distributionForLeads = 0
+decayRateLeads = 0.011
+thresholdForConversion = 0.99
+extraWeeklyHours = 20
+socialComparison = 0
+quota = 0.0
+bonus = 0.0*(salesRevenue - quota) 
+fileForLeads = data_injection/parsed_filtered_Dataset_ABM_28APR2024_withAmountNorm.csv
+
+MC-1/5 ended
+
+MC-2/5 ended
+
+MC-3/5 ended
+
+MC-4/5 ended
+
+MC-5/5 ended
+

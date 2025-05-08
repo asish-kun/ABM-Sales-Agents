@@ -1,7 +1,5 @@
-keyNameExp;simpleTest_WithExpectedSales_A;MCrun;0;CLs;196.0000;CLsByMag;16.8448;FLs;20.0000;Pay;0.5701;PeopleWorkExtra;17.0000;PeopleWithBonus;0.0000;ExpectedCLs;134.0000;ExpectedFLs;82.0000;
-keyNameExp;simpleTest_WithExpectedSales_A;MCrun;1;CLs;175.0000;CLsByMag;16.4286;FLs;30.0000;Pay;0.4439;PeopleWorkExtra;12.0000;PeopleWithBonus;0.0000;ExpectedCLs;138.0000;ExpectedFLs;67.0000;
-keyNameExp;simpleTest_WithExpectedSales_A;MCrun;2;CLs;173.0000;CLsByMag;16.2050;FLs;25.0000;Pay;0.5405;PeopleWorkExtra;11.0000;PeopleWithBonus;0.0000;ExpectedCLs;131.0000;ExpectedFLs;67.0000;
-keyNameExp;simpleTest_WithExpectedSales_A;MCrun;3;CLs;170.0000;CLsByMag;14.0690;FLs;15.0000;Pay;0.8897;PeopleWorkExtra;12.0000;PeopleWithBonus;0.0000;ExpectedCLs;130.0000;ExpectedFLs;55.0000;
-keyNameExp;simpleTest_WithExpectedSales_A;MCrun;4;CLs;149.0000;CLsByMag;11.0345;FLs;22.0000;Pay;0.6006;PeopleWorkExtra;15.0000;PeopleWithBonus;0.0000;ExpectedCLs;99.0000;ExpectedFLs;72.0000;
-keyNameExp;simpleTest_WithExpectedSales_A;MCrun;5;CLs;195.0000;CLsByMag;20.7190;FLs;23.0000;Pay;0.5261;PeopleWorkExtra;9.0000;PeopleWithBonus;0.0000;ExpectedCLs;132.0000;ExpectedFLs;86.0000;
-keyNameExp;simpleTest_WithExpectedSales_A;MCrun;6;CLs;178.0000;CLsByMag;15.0794;FLs;17.0000;Pay;0.6123;PeopleWorkExtra;14.0000;PeopleWithBonus;0.0000;ExpectedCLs;125.0000;ExpectedFLs;70.0000;
+keyNameExp;simpleTest_WithExpectedSales_A;MCrun;0;CLs;1669.0000;CLsByMag;137.4738;FLs;3216.0000;Pay;0.4037;PeopleWorkExtra;11.0000;PeopleWithBonus;0.0000;ExpectedCLs;3185.0000;ExpectedFLs;1700.0000;
+keyNameExp;simpleTest_WithExpectedSales_A;MCrun;1;CLs;1726.0000;CLsByMag;146.1074;FLs;3353.0000;Pay;1.2490;PeopleWorkExtra;12.0000;PeopleWithBonus;0.0000;ExpectedCLs;3323.0000;ExpectedFLs;1756.0000;
+keyNameExp;simpleTest_WithExpectedSales_A;MCrun;2;CLs;1697.0000;CLsByMag;138.4137;FLs;3320.0000;Pay;0.3154;PeopleWorkExtra;8.0000;PeopleWithBonus;0.0000;ExpectedCLs;3318.0000;ExpectedFLs;1699.0000;
+keyNameExp;simpleTest_WithExpectedSales_A;MCrun;3;CLs;1698.0000;CLsByMag;142.3757;FLs;3318.0000;Pay;0.3219;PeopleWorkExtra;8.0000;PeopleWithBonus;0.0000;ExpectedCLs;3248.0000;ExpectedFLs;1768.0000;
+keyNameExp;simpleTest_WithExpectedSales_A;MCrun;4;CLs;1661.0000;CLsByMag;140.5436;FLs;3359.0000;Pay;0.7830;PeopleWorkExtra;13.0000;PeopleWithBonus;0.0000;ExpectedCLs;3260.0000;ExpectedFLs;1760.0000;

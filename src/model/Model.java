@@ -767,63 +767,72 @@ public class Model extends SimState {
 	 */
 
 	protected void plotSaveAdditionalInfo(int _currentStep) {
-						
-		// here, we save information about all the sales and info agent by agent
 		if ((ModelParameters.OUTPUT_SALESPEOPLE_INFO) && (_currentStep == ((int) params.getIntParameter("maxSteps") - 1))) {
 
 			File fileStrength = new File(leadChoicesLogFile);
 
-// Open in APPEND mode (true)
-			try (PrintWriter printWriter = new PrintWriter(new FileOutputStream(fileStrength, true))) {
+			StringBuilder finalResults = new StringBuilder();
+			finalResults.append("=== FINAL AGGREGATE RESULTS ===\n");
+			finalResults.append("agentId;riskAversion;strategy;accuracy;aggrConvertedLeads;aggrExpectedConvertedLeads;")
+					.append("aggrExpectedFallOffLeads;aggrConvertedLeadsByMag;aggrPay;aggrFallOffLeads\n");
 
-				// Optionally print a small header or separator to show
-				// these lines are final aggregates, e.g.:
-				printWriter.println();
-				printWriter.println("=== FINAL AGGREGATE RESULTS ===");
-				printWriter.println("agentId;riskAversion;strategy;accuracy;aggrConvertedLeads;aggrExpectedConvertedLeads;"
-						+ "aggrExpectedFallOffLeads;aggrConvertedLeadsByMag;aggrPay;aggrFallOffLeads");
+			for (int i = 0; i < params.getIntParameter("nrAgents"); i++) {
+				SalesPerson sp = (SalesPerson) agents.get(i);
 
-				// Then loop over each SalesPerson as before and write the final lines
-				for (int i = 0; i < params.getIntParameter("nrAgents"); i++) {
-					SalesPerson sp = (SalesPerson) agents.get(i);
+				float aggrConvertedLeads = 0;
+				float aggrExpectedConvertedLeads = 0;
+				float aggrExpectedFallOffLeads = 0;
+				float aggrConvertedLeadsByMag = 0;
+				float aggrPay = 0;
+				float aggrFallOffLeads = 0;
 
-					float aggrConvertedLeads = 0;
-					float aggrExpectedConvertedLeads = 0;
-					float aggrExpectedFallOffLeads = 0;
-					float aggrConvertedLeadsByMag = 0;
-					float aggrPay = 0;
-					float aggrFallOffLeads = 0;
-
-					for (int k = 0; k < params.getIntParameter("maxSteps"); k++) {
-						aggrConvertedLeads += sp.getConvertedLeadsAtStep(k);
-						aggrExpectedConvertedLeads += sp.getExpectedConvertedLeadsAtStep(k);
-						aggrExpectedFallOffLeads += sp.getExpectedFallOffLeadsAtStep(k);
-						aggrConvertedLeadsByMag += sp.getConvertedLeadsByMagnitudeAtStep(k);
-						aggrPay += sp.getPayAtStep(k);
-						aggrFallOffLeads += sp.getFallOffLeadsAtStep(k);
-					}
-
-					printWriter.println(
-							i + ";"
-									+ sp.getRiskAversion() + ";"
-									+ sp.getStrategy().name() + ";"
-									+ sp.getAccuracy() + ";"
-									+ aggrConvertedLeads + ";"
-									+ aggrExpectedConvertedLeads + ";"
-									+ aggrExpectedFallOffLeads + ";"
-									+ aggrConvertedLeadsByMag + ";"
-									+ aggrPay + ";"
-									+ aggrFallOffLeads
-					);
+				for (int k = 0; k < params.getIntParameter("maxSteps"); k++) {
+					aggrConvertedLeads += sp.getConvertedLeadsAtStep(k);
+					aggrExpectedConvertedLeads += sp.getExpectedConvertedLeadsAtStep(k);
+					aggrExpectedFallOffLeads += sp.getExpectedFallOffLeadsAtStep(k);
+					aggrConvertedLeadsByMag += sp.getConvertedLeadsByMagnitudeAtStep(k);
+					aggrPay += sp.getPayAtStep(k);
+					aggrFallOffLeads += sp.getFallOffLeadsAtStep(k);
 				}
-			} catch (FileNotFoundException e) {
+
+				finalResults.append(i).append(";")
+						.append(sp.getRiskAversion()).append(";")
+						.append(sp.getStrategy().name()).append(";")
+						.append(sp.getAccuracy()).append(";")
+						.append(aggrConvertedLeads).append(";")
+						.append(aggrExpectedConvertedLeads).append(";")
+						.append(aggrExpectedFallOffLeads).append(";")
+						.append(aggrConvertedLeadsByMag).append(";")
+						.append(aggrPay).append(";")
+						.append(aggrFallOffLeads).append("\n");
+			}
+
+			// Read old content from file (e.g., weekly logs from previous steps)
+			StringBuilder oldContent = new StringBuilder();
+			if (fileStrength.exists()) {
+				try (BufferedReader br = new BufferedReader(new FileReader(fileStrength))) {
+					String line;
+					while ((line = br.readLine()) != null) {
+						oldContent.append(line).append("\n");
+					}
+				} catch (IOException e) {
+					e.printStackTrace();
+					log.log(Level.SEVERE, e.toString(), e);
+				}
+			}
+
+			// Overwrite the file: final results first, then previous log content
+			try (PrintWriter writer = new PrintWriter(new FileWriter(fileStrength))) {
+				writer.write(finalResults.toString());
+				writer.write("\n");  // optional separation
+				writer.write(oldContent.toString());
+			} catch (IOException e) {
 				e.printStackTrace();
 				log.log(Level.SEVERE, e.toString(), e);
 			}
-
-		}	
-				
+		}
 	}
+
 
 
 }

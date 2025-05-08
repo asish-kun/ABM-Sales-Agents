@@ -24,11 +24,6 @@ public class Tasks {
 //Strategies
 // In all the strategy only use predicted probability not actual probability
 
-// Model Running logic
-// TODO: Every week are we making probability predictions and then choose the strategies.
-// TODO: on first week we only do predictions with neural network, no strategy selection, no actual prediction
-// TODO: from next week with these predicted probabilities they will implement strategies and predict actual
-
 // Strategies Implementation
 //  Escalation of Commitment to be implemented properly:
 //  (higher number of times worked on the lead... higher weight in choosing this lead)
@@ -57,12 +52,67 @@ public class Tasks {
 
 // Design of Experiments to be run
 // TODO: 9 scenarios for 9 strategies, and all sales people use same strategy
-//  {Run each scenario 25 times}
-// TODO: Increase SalesPeople to: 10
-// TODO: Increase Portfolio to: 50 {use same portfolio size for all of them}
-// TODO: Increase MCRuns to: 25 runs per scenario
-// TODO: Increase number of weeks to: 70
+//  {Run each scenario 5 times}
+// Increase SalesPeople to: 10
+// Increase Portfolio to: 50 {use same portfolio size for all of them}
+// Increase MCRuns to: 25 runs per scenario
+// Increase number of weeks to: 70
 // TODO: Set Varying accuracy across 25 runs and repeat it to all the other runs (varying between 10%, 20% & 30%)
 // TODO: Visualize results data into a single graph
+// TODO: set number of chosen leads to 10
+//
+// [1,1,1,1,1,1,1,1,1,1] - 1 run
+// [2,2,2,2,2,2,2,2,2,2]
+// [3,3,3,3,3,3,3,3,3,3]
+// [4,4,4,4,4,4,4,4,4,4]
+// [5,5,5,5,5,5,5,5,5,5]
+// [6,6,6,6,6,6,6,6,6,6]
+// [7,7,7,7,7,7,7,7,7,7]
+// [8,8,8,8,8,8,8,8,8,8]
+// [9,9,9,9,9,9,9,9,9,9]
 
+
+// Visualizing Results
 // TODO: Automating the analysis and visualisation Part.
+
+// Actual and predicted prob
+// (pro + accu{accuracy * pred prob}, pro - accu) -> get a random from this range
+// accu{accuracy * pred prob}
+// -agentLeadChoices - [2,4,3,5,1,3,2,4,3,1]
+// only chosen leads will be updated for conversion , but probabilities are updated for every lead despite being chosen
+
+// MC RUN
+//  1st week, read the data, use the neural network to make the predictions , No converisons, No Fall offs, just initializing week
+//  2nd week follow current implementation ( only leads worked on will get to be converted)
+//  We will be check conversion first then updating probability for all the leads
+//  Update probs happen at the last setp of simulation updating all the leads attribs like weeks elapsed,.. etc
+
+
+
+// Test Runs:
+// -agentStrategies
+// [1,1,1,1,1,1,1,1,1,1] - 3 run
+// [2,2,2,2,2,2,2,2,2,2]
+// [3,3,3,3,3,3,3,3,3,3]
+// [4,4,4,4,4,4,4,4,4,4]
+// [5,5,5,5,5,5,5,5,5,5]
+// [6,6,6,6,6,6,6,6,6,6]
+// [7,7,7,7,7,7,7,7,7,7]
+// [8,8,8,8,8,8,8,8,8,8]
+// [9,9,9,9,9,9,9,9,9,9]
+
+//\
+//-agentAccuracies
+// [0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1]
+// [0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2,0.2]
+// [0.3,0.3,0.3,0.3,0.3,0.3,0.3,0.3,0.3,0.3]
+// [0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4,0.4]
+//\
+//-agentLeadChoices
+//[5,5,5,5,5,5,5,5,5,5]
+//\
+//-agentPortfolioSizes
+//[50,50,50,50,50,50,50,50,50,50]
+//\
+//-fallOffProbability
+//0.10

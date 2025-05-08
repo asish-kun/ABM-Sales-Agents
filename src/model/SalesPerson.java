@@ -642,6 +642,8 @@ public class SalesPerson implements Steppable {
 		for (int i = 0; i < this.portfolio.size(); i++) {
 
 			boolean replaceLead = false;
+			Lead lead = this.portfolio.get(i);
+			boolean wasWorked = lead.getWeeksSinceLastChosen(currentStep) == 0;
 
 			float  randomProbability = model.random.nextFloat();
 
@@ -649,7 +651,7 @@ public class SalesPerson implements Steppable {
 			//TODO: Weather chosen or not fall off probability is constantly updated
 			//TODO: Compare it with the actual probability of conversion
 
-			if(randomProbability < this.portfolio.get(i).getProbToBeConverted()){
+			if(randomProbability < this.portfolio.get(i).getProbToBeConverted() && wasWorked){
 
 //				System.out.printf("Lead %d CONVERTED! Prob: %.2f\n",
 //						this.portfolio.get(i).getID(),
@@ -884,22 +886,28 @@ public class SalesPerson implements Steppable {
 			this.workingHours[currentStep] = ModelParameters.WORKINGHOURSPERWEEK;
 		}
 
-		// PHASE 3: Define multiple strategies for sales person to choose, we specify strategy for each sales agent at the beginning of the simulation and will be following the same strategy throughout the simulation
-		// strategy 1: choose by magnitude size
-		// strategy 2: choose by conversion probability
-		// strategy 2: choose by Expected Value
+		if (currentStep == 0) {
+			// Week 1: No conversions or fall-offs, only NN-based probability update
+			for (Lead lead : portfolio) {
+				lead.updateLeadProbs(false); // update using NN, no leads were worked
+				lead.incrementWeeksElapsed(); // still simulate time passing
+			}
+		} else {
+			// Week 2 and beyond: run normal strategy
+			this.decisionMakingLeadToWork();    // choose and mark top leads
+			this.updatePortfolio(state);       // conversion & fall-off logic
+			this.calculatePayWithCompensation(); // compute salary/bonus
 
-		// PHASE 2: DECIDE, FOR EVERY HOUR OF THE TIME-STEP (WEEK) THE LEADS TO WORK ON
-		// asish: 40 hours : 2 x 20 hours time blocks.
-		// asish: choose top 2 leads out of 3 lead (debug stage)
-		// 2 params number leads to choose: 2, total leads (portfolio size): 3
-		// selecting the top 2 leads based on the strategy chosen for selecting leads.
+			// Final: update probabilities AFTER conversion/fall-off
+			for (Lead lead : portfolio) {
+				lead.updateLeadProbs(false); // re-evaluate probabilities for next round
+				lead.incrementWeeksElapsed(); // advance weeks for every lead
+			}
+		}
 
 
-		// Choose top 3 leads once per week based on strategy
-		this.decisionMakingLeadToWork();
-
-//		for (int h = 0; h < this.workingHours[currentStep]; h++ ) {
+	}
+	//		for (int h = 0; h < this.workingHours[currentStep]; h++ ) {
 //			int chosenLead = this.decisionMakingLeadToWork(model.random);
 //
 //			// Update leads, marking which was worked on
@@ -920,14 +928,5 @@ public class SalesPerson implements Steppable {
 //			}
 //
 //		}
-		
-		// PHASE 4: UPDATE THE PROBS (ONLY IF SALESPEOPLE WERE WORKING ON IT A WEEK) OF THE PORTFOLIO TO ALSO COUNT THOSE CONVERTED AND FALLEN-OFF
-		this.updatePortfolio(state);		
-		this.calculatePayWithCompensation();
 
-		// Increment weeksElapsed for all leads in the portfolio
-		for (Lead lead : portfolio) {
-			lead.incrementWeeksElapsed();
-		}
-	}
 }

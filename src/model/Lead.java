@@ -290,14 +290,14 @@ public class Lead {
 		if (weeksElapsedStr == null) {
 			weeksElapsedStr = "0"; // default value for integer
 		}
-		this.weeksElapsed = Integer.parseInt(weeksElapsedStr);
+		this.weeksElapsed = 0;
 
 		// weeksDiffPrior
 		String weeksDiffPriorStr = _readLead.getWeeksDiffPrior();
 		if (weeksDiffPriorStr == null) {
 			weeksDiffPriorStr = "0";
 		}
-		this.weeksDiffPrior = Integer.parseInt(weeksDiffPriorStr);
+		this.weeksDiffPrior = 0;
 
 		// realLeadSum
 		String realLeadSumStr = _readLead.getRealLeadSum();
@@ -381,22 +381,19 @@ public class Lead {
 	 * 
 	 */
 	public void updateLeadProbs(boolean hasWorked) {
-
- 		//TODO:we will have 2 ProbOfConversion
-		//TODO: one is ActualProbability of Conversion, and one is predictedProbofConversion
-		// true probability is based of predicted probability
-		// and then use actual probability of conversion to check if a lead is converting or not
-		// Setting our own accuracy (parameter) - Will be inputed by the user
-
 		float[] feats = asNNFeatures();
 		float[] pred  = nnManager.predictScaled(feats);
 
 		this.predictedProbToBeConverted = pred[0];
-		this.probToBeConverted          = accuracy * pred[0];
 
-		// simple complimentary fall-off
-//		this.probToFallOff = 1f - this.probToBeConverted;
+		float delta = accuracy * predictedProbToBeConverted; // percentage-based margin
+		float lowerBound = Math.max(0f, predictedProbToBeConverted - delta);
+		float upperBound = Math.min(1f, predictedProbToBeConverted + delta);
 
+		float range = upperBound - lowerBound;
+		float randomOffset = (float) Math.random() * range;
+
+		this.probToBeConverted = lowerBound + randomOffset;
 	}
 
 
